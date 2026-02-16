@@ -66,7 +66,7 @@ export default function Home({ onSelectMode }: HomeProps) {
         <div className="flex flex-wrap justify-center gap-4 mt-2">
           {/* Link do Café Atualizado para o seu Checkout do Mercado Pago */}
           <a
-            href="https://www.mercadopago.com.br"
+            href="https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=444f1eb39bc44922871a3d10b7350c81"
             target="_blank"
             rel="noreferrer"
             className="bg-yellow-400 text-indigo-900 px-6 py-3 rounded-2xl font-black text-sm shadow-[0_4px_0_0_#b58900] hover:translate-y-[-2px] active:translate-y-0 transition-all flex items-center gap-2"
