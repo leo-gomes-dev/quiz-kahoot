@@ -1,73 +1,55 @@
-# React + TypeScript + Vite
+##🚀 Quiz Interativo (Estilo Kahoot)
+Um sistema de quiz em tempo real de alta performance, desenvolvido para ambientes educacionais e eventos. O projeto permite que um professor gerencie bibliotecas de questões e controle o fluxo de partidas ao vivo, enquanto os alunos competem instantaneamente.
+🔗 Acesse agora: quiz.leogomesdev.com
+📸 Preview
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-Currently, two official plugins are available:
+##✨ Funcionalidades
+##🍎 Área do Mestre (Restrita)
+Autenticação Segura: Acesso protegido por identificador dinâmico via .env.
+Gestão de Biblioteca: Criação, edição e exclusão de questões organizadas por Blocos de Poder.
+Double Points (2x): Ativação de pontuação dobrada com feedback visual 🔥.
+Painel de Controle: Início imediato de partidas e reset de salas.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+##🎓 Área do Aluno
+Entrada Facilitada: Acesso via código único de sala.
+Interface Gamer: Design responsivo focado em rapidez de resposta.
+Feedback Instantâneo: Toasts e animações de acerto/erro.
 
-## React Compiler
+##🛠️ Tecnologias Utilizadas
+Camada	Tecnologia
+Frontend	React 19, TypeScript, Vite
+Estilização	Tailwind CSS, Glassmorphism, Framer Motion
+Backend	Supabase (PostgreSQL & Real-time Subscriptions)
+Infraestrutura	Coolify, Docker, Nginx (Alpine)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+##📦 Estrutura de Dados (Supabase)
+O sistema utiliza a engine em tempo real do Supabase para sincronizar:
+question_library: Banco de dados persistente de perguntas e blocos.
+questions: Repositório de questões da partida em andamento.
+game_status: Tabela de sincronização de estado (pergunta atual, status da sala).
 
-## Expanding the ESLint configuration
+##🚀 Instalação Local
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Clone o repositório:
+git clone https://github.com
+cd quiz-kahoot
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Instale as dependências:
+npm install
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Configuração de Ambiente (.env):
+env
+VITE_SUPABASE_URL=seu_projeto_url
+VITE_SUPABASE_ANON_KEY=sua_chave_anon
+VITE_ADMIN_EMAIL=leogomes
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Execução:
+npm run dev
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+##🎨 UI/UX Design
+O projeto utiliza uma estética moderna com Glassmorphism, paleta de cores vibrantes (Indigo, Purple, Pink)
+e foco total em acessibilidade e responsividade, garantindo uma experiência fluida tanto em dispositivos móveis quanto em desktops.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Desenvolvido com 💜 por Leo Gomes
+🌐 leogomesdev.com | 🐙 GitHub
