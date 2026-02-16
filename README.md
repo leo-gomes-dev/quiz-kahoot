@@ -1,10 +1,13 @@
 ##🚀 Quiz Interativo (Estilo Kahoot)
-Um sistema de quiz em tempo real de alta performance, desenvolvido para ambientes educacionais e eventos. O projeto permite que um professor gerencie bibliotecas de questões e controle o fluxo de partidas ao vivo, enquanto os alunos competem instantaneamente.
+Um sistema de quiz em tempo real de alta performance, desenvolvido para ambientes educacionais e eventos. 
+O projeto permite que um professor gerencie bibliotecas de questões e controle o fluxo de partidas ao vivo, enquanto os alunos competem instantaneamente.
+
 🔗 Acesse agora: quiz.leogomesdev.com
 📸 Preview
 
 
 ##✨ Funcionalidades
+
 ##🍎 Área do Mestre (Restrita)
 Autenticação Segura: Acesso protegido por identificador dinâmico via .env.
 Gestão de Biblioteca: Criação, edição e exclusão de questões organizadas por Blocos de Poder.
