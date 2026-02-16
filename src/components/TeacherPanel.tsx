@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react"; // Adicionado useRef aqui
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 
-// --- INTERFACES ESTRITAS (SEM ANY) ---
+// --- INTERFACES ---
 interface Question {
   id: string;
   text: string;
@@ -29,6 +29,8 @@ interface TeacherPanelProps {
   onStartGame: (questions: Question[]) => void;
 }
 
+type OptionKey = "a" | "b" | "c" | "d";
+
 export default function TeacherPanel({
   gameCode,
   onBack,
@@ -38,17 +40,25 @@ export default function TeacherPanel({
   const [library, setLibrary] = useState<Question[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
+  const [expandedLibBlock, setExpandedLibBlock] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null); // Para clique duplo genérico
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [blockName, setBlockName] = useState("Meu Bloco 🚀");
   const [text, setText] = useState("");
-  const [opts, setOpts] = useState({ a: "", b: "", c: "", d: "" });
+  const [opts, setOpts] = useState<{ [key in OptionKey]: string }>({
+    a: "",
+    b: "",
+    c: "",
+    d: "",
+  });
   const [correct, setCorrect] = useState("a");
+  const [isDouble, setIsDouble] = useState(false);
 
   const inputRef = useRef<HTMLDivElement>(null);
 
+  // Solução para o erro de setState: manter a lógica isolada
   const refreshLibrary = useCallback(async () => {
     const { data, error } = await supabase
       .from("question_library")
@@ -56,10 +66,9 @@ export default function TeacherPanel({
       .returns<QuestionLibraryRow[]>();
 
     if (error) return;
-
     if (data) {
       setLibrary(
-        data.map((q: QuestionLibraryRow) => ({
+        data.map((q) => ({
           id: q.id,
           text: q.text,
           correctOption: q.correct_option,
@@ -76,63 +85,42 @@ export default function TeacherPanel({
     }
   }, []);
 
+  // UseEffect corrigido para evitar cascading renders
   useEffect(() => {
-    let isMounted = true;
-    const loadData = async () => {
-      const { data, error } = await supabase
-        .from("question_library")
-        .select("*");
-      if (error) return;
-      if (isMounted && data) {
-        setLibrary(
-          data.map((q: QuestionLibraryRow) => ({
-            id: q.id,
-            text: q.text,
-            correctOption: q.correct_option,
-            isDouble: q.is_double || false,
-            block_name: q.block_name || "Geral",
-            options: {
-              a: q.option_a,
-              b: q.option_b,
-              c: q.option_c,
-              d: q.option_d,
-            },
-          })),
-        );
-      }
+    let active = true;
+    const load = async () => {
+      if (active) await refreshLibrary();
     };
-    loadData();
+    load();
     return () => {
-      isMounted = false;
+      active = false;
     };
-  }, [gameCode]);
+  }, [refreshLibrary]);
 
   const resetForm = () => {
     setEditingId(null);
     setText("");
     setOpts({ a: "", b: "", c: "", d: "" });
     setCorrect("a");
+    setIsDouble(false);
   };
 
   const handleEditQuestion = (q: Question) => {
     setEditingId(q.id);
     setText(q.text);
-    setOpts(q.options);
+    setOpts(q.options as { [key in OptionKey]: string });
     setCorrect(q.correctOption);
     setBlockName(q.block_name || "Meu Bloco 🚀");
-
-    setTimeout(() => {
-      inputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 100);
+    setIsDouble(q.isDouble);
+    inputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const handleSave = async () => {
     if (!text || !opts.a || !opts.b) {
-      setToast("Preencha a pergunta e ao menos duas opções! 📝");
+      setToast("Preencha tudo! 📝");
       setTimeout(() => setToast(null), 3000);
       return;
     }
-
     const payload = {
       text,
       option_a: opts.a,
@@ -141,8 +129,8 @@ export default function TeacherPanel({
       option_d: opts.d,
       correct_option: correct,
       block_name: blockName,
+      is_double: isDouble,
     };
-
     const { error } = editingId
       ? await supabase
           .from("question_library")
@@ -151,41 +139,24 @@ export default function TeacherPanel({
       : await supabase.from("question_library").insert([payload]);
 
     if (!error) {
-      setToast(editingId ? "Questão atualizada! ✨" : "Questão salva! ✅");
+      setToast(editingId ? "Atualizado! ✨" : "Salvo! ✅");
       resetForm();
-      await refreshLibrary();
+      refreshLibrary();
     } else {
-      setToast("Erro ao salvar no banco ❌");
+      setToast("Erro no banco ❌");
     }
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const deleteBlock = async (name: string) => {
-    if (confirmDeleteId !== name) {
-      setConfirmDeleteId(name);
-      setToast(`Clique novamente para apagar o bloco "${name}" ⚠️`);
-      setTimeout(() => setConfirmDeleteId(null), 4000);
-      return;
-    }
-    await supabase.from("question_library").delete().eq("block_name", name);
-    setToast("Bloco deletado! 🗑️");
-    setConfirmDeleteId(null);
-    refreshLibrary();
     setTimeout(() => setToast(null), 3000);
   };
 
   const deleteSingleQuestion = async (id: string) => {
     if (confirmDeleteId !== id) {
       setConfirmDeleteId(id);
-      setToast("Clique novamente para excluir esta questão! ⚠️");
-      setTimeout(() => setConfirmDeleteId(null), 4000);
+      setTimeout(() => setConfirmDeleteId(null), 3000);
       return;
     }
     await supabase.from("question_library").delete().eq("id", id);
-    setToast("Questão removida! 🗑️");
     setConfirmDeleteId(null);
     refreshLibrary();
-    setTimeout(() => setToast(null), 3000);
   };
 
   const startQuiz = async (name: string) => {
@@ -200,53 +171,52 @@ export default function TeacherPanel({
       option_c: q.options.c,
       option_d: q.options.d,
       correct_option: q.correctOption,
+      is_double: q.isDouble,
     }));
     await supabase.from("questions").insert(formatted);
-    const { error } = await supabase
+    await supabase
       .from("game_status")
       .upsert(
         { game_code: gameCode, status: "playing", current_question_index: 0 },
         { onConflict: "game_code" },
       );
-    if (!error) onStartGame(questionsToPlay);
+    onStartGame(questionsToPlay);
     setLoading(false);
   };
 
   const blocks = Array.from(new Set(library.map((q) => q.block_name)));
 
   return (
-    <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col selection:bg-yellow-400 selection:text-indigo-900">
+    <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col">
       {toast && (
-        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top-10 duration-300 text-center w-full max-w-md px-4">
-          <div className="bg-[#10ad59] text-white px-8 py-4 rounded-2xl font-black shadow-2xl flex items-center justify-center gap-3 border-b-4 border-[#096132]">
-            <span>✨</span> {toast}
-          </div>
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-50 bg-[#10ad59] px-8 py-4 rounded-2xl font-black shadow-2xl animate-in slide-in-from-top-10">
+          {toast}
         </div>
       )}
 
-      <div className="flex-1 p-4 md:p-10 pb-32 max-w-6xl mx-auto w-full">
-        <header className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12 bg-white/10 p-6 rounded-[2rem] border-b-8 border-black/20 backdrop-blur-sm">
+      <div className="flex-1 p-4 md:p-10 pb-32 max-w-7xl mx-auto w-full">
+        <header className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12 bg-white/10 p-6 rounded-[2rem] border-b-8 border-black/20">
           <div className="flex items-center gap-4">
             <button
               onClick={onBack}
-              className="bg-white/10 p-3 rounded-2xl hover:bg-red-500 transition-all font-black uppercase text-[10px] tracking-widest"
+              className="bg-white/10 p-3 rounded-2xl hover:bg-red-500 font-black text-[10px]"
             >
               SAIR
             </button>
-            <h1 className="text-3xl font-black italic tracking-tighter text-yellow-400 drop-shadow-lg">
+            <h1 className="text-3xl font-black italic text-yellow-400">
               TEACHER PANEL 🍎
             </h1>
           </div>
-          <div className="flex bg-black/20 p-2 rounded-3xl border border-white/10">
+          <div className="flex bg-black/20 p-2 rounded-3xl">
             <button
               onClick={() => setView("setup")}
-              className={`px-8 py-3 rounded-2xl font-black transition-all ${view === "setup" ? "bg-yellow-400 text-indigo-900 translate-y-[-2px] shadow-[0_4px_0_0_#b58900]" : "hover:text-yellow-400"}`}
+              className={`px-8 py-3 rounded-2xl font-black transition-all ${view === "setup" ? "bg-yellow-400 text-indigo-900 shadow-[0_4px_0_0_#b58900]" : ""}`}
             >
               JOGAR
             </button>
             <button
               onClick={() => setView("library")}
-              className={`px-8 py-3 rounded-2xl font-black transition-all ${view === "library" ? "bg-pink-500 text-white translate-y-[-2px] shadow-[0_4px_0_0_#9d174d]" : "hover:text-pink-400"}`}
+              className={`px-8 py-3 rounded-2xl font-black transition-all ${view === "library" ? "bg-pink-500 text-white shadow-[0_4px_0_0_#9d174d]" : ""}`}
             >
               QUESTÕES
             </button>
@@ -254,60 +224,38 @@ export default function TeacherPanel({
         </header>
 
         {view === "setup" ? (
-          <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-500">
-            <h2 className="text-center text-2xl font-black uppercase tracking-widest text-white/70">
-              Escolha o seu Bloco de Poder! ✨
-            </h2>
+          <div className="space-y-6 max-w-4xl mx-auto animate-in slide-in-from-bottom-4">
             {blocks.map((block) => (
               <div
                 key={block}
                 className="bg-white rounded-[2.5rem] text-indigo-900 border-b-8 border-gray-300 overflow-hidden transition-all"
               >
                 <div
-                  className="p-8 flex justify-between items-center cursor-pointer hover:bg-gray-50"
+                  className="p-8 flex justify-between items-center cursor-pointer"
                   onClick={() =>
                     setExpandedBlock(expandedBlock === block ? null : block)
                   }
                 >
                   <div className="flex items-center gap-6">
-                    <div className="bg-indigo-100 w-16 h-16 rounded-3xl flex items-center justify-center text-3xl shadow-inner">
+                    <div className="bg-indigo-100 w-16 h-16 rounded-3xl flex items-center justify-center text-3xl">
                       📦
                     </div>
-                    <div>
-                      <h3 className="text-2xl font-black uppercase leading-none mb-1">
-                        {block}
-                      </h3>
-                      <p className="text-sm font-extrabold text-indigo-400 uppercase tracking-widest">
-                        {library.filter((q) => q.block_name === block).length}{" "}
-                        Questões
-                      </p>
-                    </div>
+                    <h3 className="text-2xl font-black uppercase tracking-tighter">
+                      {block}
+                    </h3>
                   </div>
                   <span className="text-3xl opacity-30">
                     {expandedBlock === block ? "▲" : "▼"}
                   </span>
                 </div>
                 {expandedBlock === block && (
-                  <div className="px-8 pb-8 pt-4 border-t-2 border-gray-100 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
-                      {library
-                        .filter((q) => q.block_name === block)
-                        .map((q, i) => (
-                          <div
-                            key={q.id}
-                            className="bg-indigo-50 p-4 rounded-2xl text-sm font-bold border border-indigo-100 flex gap-3"
-                          >
-                            <span className="text-indigo-300">#{i + 1}</span>{" "}
-                            {q.text}
-                          </div>
-                        ))}
-                    </div>
+                  <div className="px-8 pb-8 animate-in fade-in">
                     <button
                       onClick={() => startQuiz(block)}
                       disabled={loading}
-                      className="w-full bg-[#10ad59] hover:bg-[#0d8c48] text-white py-6 rounded-[2rem] font-black text-2xl shadow-[0_6px_0_0_#096132] active:translate-y-1 transition-all"
+                      className="w-full bg-[#10ad59] text-white py-6 rounded-[2rem] font-black text-2xl shadow-[0_6px_0_0_#096132] active:translate-y-1"
                     >
-                      {loading ? "PREPARANDO..." : "🚀 COMEÇAR QUIZ AGORA!"}
+                      {loading ? "PREPARANDO..." : "🚀 COMEÇAR QUIZ!"}
                     </button>
                   </div>
                 )}
@@ -315,12 +263,13 @@ export default function TeacherPanel({
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            {/* FORMULÁRIO COM TIPAGEM CORRETA */}
             <div
               ref={inputRef}
-              className="bg-white p-8 rounded-[3rem] border-b-8 border-gray-300 text-indigo-900 lg:sticky lg:top-10 z-20 shadow-2xl scroll-mt-10"
+              className="bg-white p-8 rounded-[3rem] border-b-8 border-gray-300 text-indigo-900 lg:sticky lg:top-10 h-fit shadow-2xl"
             >
-              <h3 className="font-black text-2xl mb-8 flex items-center gap-2">
+              <h3 className="font-black text-2xl mb-6">
                 {editingId ? "✏️ EDITANDO" : "➕ NOVA QUESTÃO"}
               </h3>
               <div className="space-y-4">
@@ -328,106 +277,117 @@ export default function TeacherPanel({
                   value={blockName}
                   onChange={(e) => setBlockName(e.target.value)}
                   placeholder="Nome do Bloco"
-                  className="w-full bg-indigo-50 border-2 border-indigo-100 p-4 rounded-2xl font-bold outline-none focus:border-indigo-400 transition"
+                  className="w-full bg-indigo-50 border-2 p-4 rounded-2xl font-bold outline-none"
                 />
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder="Pergunta"
-                  className="w-full bg-indigo-50 border-2 border-indigo-100 p-4 rounded-2xl font-bold h-24 outline-none focus:border-indigo-400 transition"
+                  className="w-full bg-indigo-50 border-2 p-4 rounded-2xl font-bold h-24 outline-none"
                 />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {["a", "b", "c", "d"].map((l) => (
+                  {(["a", "b", "c", "d"] as const).map((l) => (
                     <div
                       key={l}
                       onClick={() => setCorrect(l)}
-                      className="relative cursor-pointer transition-all"
+                      className={`relative cursor-pointer p-4 rounded-2xl border-4 ${correct === l ? "border-green-500 bg-green-50" : "border-indigo-50 bg-indigo-50"}`}
                     >
                       <input
-                        value={opts[l as keyof typeof opts]}
+                        value={opts[l]}
                         onChange={(e) =>
                           setOpts({ ...opts, [l]: e.target.value })
                         }
+                        onClick={(e) => e.stopPropagation()}
                         placeholder={`Opção ${l.toUpperCase()}`}
-                        className={`w-full bg-indigo-50 border-4 p-4 rounded-2xl font-bold text-sm outline-none transition ${correct === l ? "border-green-500 bg-green-50" : "border-indigo-100"}`}
-                      />
-                      <div
-                        className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-4 ${correct === l ? "bg-green-500 border-white" : "border-indigo-200"}`}
+                        className="w-full bg-transparent font-bold outline-none"
                       />
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-3 pt-4">
+                <label className="flex items-center gap-3 p-4 bg-yellow-100 rounded-2xl cursor-pointer border-2 border-yellow-200">
+                  <input
+                    type="checkbox"
+                    checked={isDouble}
+                    onChange={(e) => setIsDouble(e.target.checked)}
+                    className="w-6 h-6 accent-orange-600"
+                  />
+                  <span className="font-black text-orange-700 uppercase text-xs tracking-widest">
+                    🔥 Valer Dobro (2x)
+                  </span>
+                </label>
+                <div className="flex gap-3">
                   <button
                     onClick={handleSave}
-                    className="flex-1 bg-purple-600 hover:bg-purple-500 text-white p-5 rounded-[2rem] font-black text-xl shadow-[0_6px_0_0_#4c1d95] active:translate-y-1 active:shadow-none transition-all"
+                    className="flex-1 bg-purple-600 text-white p-5 rounded-[2rem] font-black text-xl shadow-[0_6px_0_0_#4c1d95] active:translate-y-1"
                   >
                     SALVAR
                   </button>
                   {editingId && (
                     <button
                       onClick={resetForm}
-                      className="px-8 bg-gray-200 rounded-[2rem] font-black text-gray-500 hover:bg-gray-300 transition-all uppercase text-[10px]"
+                      className="px-8 bg-gray-200 rounded-[2rem] font-black text-gray-500"
                     >
-                      Cancelar
+                      X
                     </button>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="space-y-6">
+            {/* LISTA DE BIBLIOTECA */}
+            <div className="space-y-4">
               {blocks.map((block) => (
                 <div
                   key={block}
-                  className="bg-black/20 rounded-[2.5rem] p-6 border border-white/10 backdrop-blur-sm"
+                  className="bg-white/10 rounded-[2rem] border border-white/10 overflow-hidden"
                 >
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-black text-yellow-400 uppercase italic tracking-tighter">
+                  <div
+                    className="p-6 flex justify-between items-center cursor-pointer hover:bg-white/5"
+                    onClick={() =>
+                      setExpandedLibBlock(
+                        expandedLibBlock === block ? null : block,
+                      )
+                    }
+                  >
+                    <span className="font-black text-yellow-400 uppercase">
                       {block}
-                    </h3>
-                    <button
-                      onClick={() => deleteBlock(block)}
-                      className={`px-4 py-2 rounded-xl font-black text-[10px] transition-all ${confirmDeleteId === block ? "bg-red-500 animate-pulse text-white shadow-none" : "bg-white/10 text-white hover:bg-red-500"}`}
-                    >
-                      {confirmDeleteId === block
-                        ? "CONFIRMAR?"
-                        : "APAGAR BLOCO"}
-                    </button>
+                    </span>
+                    <span className="text-xs font-bold opacity-50">
+                      {library.filter((q) => q.block_name === block).length}{" "}
+                      questões {expandedLibBlock === block ? "▲" : "▼"}
+                    </span>
                   </div>
-                  <div className="space-y-3">
-                    {library
-                      .filter((q) => q.block_name === block)
-                      .map((q) => (
-                        <div
-                          key={q.id}
-                          className="bg-white/5 p-4 rounded-2xl border border-white/5 flex justify-between items-center group hover:bg-white/10 transition-all"
-                        >
-                          <div className="flex flex-col">
-                            <span className="font-bold text-sm opacity-80 text-white truncate max-w-[200px]">
+                  {expandedLibBlock === block && (
+                    <div className="p-4 space-y-3 bg-black/10 animate-in slide-in-from-top-2">
+                      {library
+                        .filter((q) => q.block_name === block)
+                        .map((q) => (
+                          <div
+                            key={q.id}
+                            className="bg-white/5 p-4 rounded-xl flex justify-between items-center group"
+                          >
+                            <p className="font-bold text-sm leading-tight flex-1 mr-4">
+                              {q.isDouble && "🔥 "}
                               {q.text}
-                            </span>
-                            <span className="text-[9px] font-black text-green-400 uppercase tracking-widest mt-1 italic">
-                              Gabarito: {q.correctOption}
-                            </span>
+                            </p>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleEditQuestion(q)}
+                                className="p-2 bg-yellow-400 text-indigo-900 rounded-lg text-xs font-bold transition-all hover:scale-110"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                onClick={() => deleteSingleQuestion(q.id)}
+                                className={`p-2 rounded-lg text-xs font-bold transition-all ${confirmDeleteId === q.id ? "bg-red-500 text-white" : "bg-white/10"}`}
+                              >
+                                {confirmDeleteId === q.id ? "OK?" : "🗑️"}
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditQuestion(q)}
-                              className="bg-yellow-400 text-indigo-900 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-[0_2px_0_0_#b58900] active:translate-y-[1px]"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              onClick={() => deleteSingleQuestion(q.id)}
-                              className={`p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:translate-y-[1px] ${confirmDeleteId === q.id ? "bg-red-500 animate-pulse text-white" : "bg-white/10 text-white hover:bg-red-500"}`}
-                            >
-                              {confirmDeleteId === q.id ? "OK?" : "🗑️"}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
