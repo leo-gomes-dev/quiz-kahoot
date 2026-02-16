@@ -47,3 +47,8 @@ O sistema utiliza a engine em tempo real do Supabase para sincronizar:
    ```bash
    git clone https://github.com
    cd quiz-kahoot
+
+   npm install
+
+   npm run dev
+
