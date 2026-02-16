@@ -1,5 +1,3 @@
-import React from "react";
-
 // --- INTERFACE DAS PROPS ---
 interface StudentWaitingProps {
   playerName: string;

@@ -1,5 +1,3 @@
-import React from "react";
-
 // --- INTERFACE DAS PROPS ---
 interface HomeProps {
   onSelectMode: (mode: "teacher" | "student-join") => void;
