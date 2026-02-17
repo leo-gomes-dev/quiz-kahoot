@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import confetti from "canvas-confetti";
+import LeoGomesFooter from "./Footer";
 // import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 // --- INTERFACES ---
@@ -564,6 +565,7 @@ export default function GameControl({
           )}
         </div>
       </div>
+      <LeoGomesFooter />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import LeoGomesFooter from "./Footer";
 
 // --- INTERFACES ---
 interface Question {
@@ -419,6 +420,7 @@ export default function TeacherPanel({
           </div>
         )}
       </div>
+      <LeoGomesFooter />
     </div>
   );
 }
