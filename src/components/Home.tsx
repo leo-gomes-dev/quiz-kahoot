@@ -4,6 +4,7 @@ interface HomeProps {
 }
 
 export default function Home({ onSelectMode }: HomeProps) {
+  const newYear = new Date().getFullYear();
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col selection:bg-yellow-400 selection:text-indigo-900">
       <div className="flex-1 flex flex-col items-center justify-center p-6 pb-32">
@@ -73,17 +74,9 @@ export default function Home({ onSelectMode }: HomeProps) {
           >
             ☕ APOIAR PROJETO
           </a>
-          <a
-            href="https://leogomesdev.com"
-            target="_blank"
-            rel="noreferrer"
-            className="bg-white/10 px-6 py-3 rounded-2xl font-black text-sm border border-white/10 hover:bg-white/20 transition-all tracking-widest"
-          >
-            SITE 🌐
-          </a>
         </div>
         <p className="text-[10px] font-bold text-white/20 mt-4 uppercase tracking-widest">
-          © 2024 - Projeto Quiz Battle
+          © {newYear} - Projeto Quiz Battle
         </p>
       </footer>
     </div>
