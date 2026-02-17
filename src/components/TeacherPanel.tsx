@@ -185,8 +185,6 @@ export default function TeacherPanel({
   };
 
   const blocks = Array.from(new Set(library.map((q) => q.block_name)));
-  console.log("Bibliotecas carregadas:", library);
-  console.log("Blocos identificados:", blocks);
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col">

@@ -113,13 +113,6 @@ export default function StudentQuiz({
           const newData = payload.new as GameStatus;
           if (!newData || !newData.status) return;
 
-          console.log(
-            "⚡ Realtime:",
-            newData.status,
-            "Index:",
-            newData.current_question_index,
-          );
-
           if (newData.status === "playing" || newData.status === "started") {
             // Busca a pergunta baseada no novo index enviado pelo professor
             await fetchCurrentQuestion(newData.current_question_index);
@@ -138,7 +131,6 @@ export default function StudentQuiz({
         },
       )
       .subscribe((status) => {
-        console.log("📡 Conexão Aluno:", status);
         if (status === "TIMED_OUT") {
           console.warn("Reconectando canal...");
           setTimeout(() => channel.subscribe(), 2000);
@@ -168,7 +160,6 @@ export default function StudentQuiz({
     init();
 
     return () => {
-      console.log("Removendo canal...");
       supabase.removeChannel(channel);
     };
     // REMOVIDO fetchCurrentQuestion e fetchRanking das dependências para evitar loop de Timeout
