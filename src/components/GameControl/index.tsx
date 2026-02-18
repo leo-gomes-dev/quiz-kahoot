@@ -67,27 +67,38 @@ export default function GameControl({
     setTimeLeft(null);
 
     const nextIndex = index + 1;
-    if (nextIndex >= questions.length) return handleFinish();
 
+    // 1. Se chegou ao fim, chama o finish e para aqui
+    if (nextIndex >= questions.length) {
+      return handleFinish();
+    }
+
+    // 2. Atualiza o índice LOCAL do professor
     setIndex(nextIndex);
 
-    // Envia status de ranking para travar a tela do aluno
+    // 3. ATUALIZAÇÃO NO BANCO:
+    // O status "ranking" deve manter o índice da pergunta que ACABOU de passar (index)
+    // ou apenas sinalizar a transição.
     await supabase
       .from("game_status")
       .update({
         status: "ranking",
-        current_question_index: nextIndex,
+        current_question_index: index, // Mantém a referência da questão encerrada
         expires_at: null,
       })
       .eq("game_code", gameCode);
 
+    // 4. OBRIGATÓRIO: Busca o ranking atualizado do banco para o estado do Professor
+    void fetchRanking();
+
+    // 5. Lógica de blocos ou contagem regressiva
     if (nextIndex > 0 && nextIndex % 5 === 0) {
       setIsBlockTransition(true);
       setBlockCountdown(5);
     } else {
       setPreCountdown(5);
     }
-  }, [index, questions.length, gameCode, handleFinish]);
+  }, [index, questions.length, gameCode, handleFinish, fetchRanking]); // Adicionado fetchRanking nas dependências
 
   const executeSkip = useCallback(async () => {
     setPreCountdown(null);

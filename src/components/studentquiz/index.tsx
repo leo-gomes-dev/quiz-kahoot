@@ -121,6 +121,7 @@ export default function StudentQuiz({
           table: "game_status",
           filter: `game_code=eq.${gameCode}`,
         },
+        // NO STUDENTQUIZ.TSX - Dentro do useEffect do channel.on
         (payload: RealtimePostgresChangesPayload<GameStatusRow>) => {
           const newData = payload.new as GameStatusRow;
           if (!newData) return;
@@ -135,28 +136,31 @@ export default function StudentQuiz({
                 expires_at,
               );
               break;
+
             case "ranking":
               setIsPreparing(false);
               void fetchRanking();
               void fetchMyScore();
               setView("ranking");
               break;
-            case "finished":
+
+            case "finished": // <--- ADICIONE ESTE CASE
               setIsPreparing(false);
-              setView("gameover");
-              void confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
+              // Busca a pontuação final antes de mudar a tela
+              void fetchMyScore().then(() => {
+                setView("gameover");
+                // DISPARA O CONFETE NO DISPOSITIVO DO ALUNO
+                void confetti({
+                  particleCount: 150,
+                  spread: 70,
+                  origin: { y: 0.6 },
+                  zIndex: 999,
+                });
               });
               break;
+
             case "started":
               setIsPreparing(true);
-              setView("loading");
-              setCurrentQuestion(null);
-              break;
-            default:
-              setIsPreparing(false);
               setView("loading");
               break;
           }
@@ -186,21 +190,27 @@ export default function StudentQuiz({
     void init();
 
     // Watchdog: Força sincronia se o Realtime falhar
-    const watchdog = setInterval(async () => {
+    const watchdog = window.setInterval(async () => {
       const { data } = await supabase
         .from("game_status")
         .select("status, current_question_index, expires_at")
         .eq("game_code", gameCode)
         .maybeSingle();
-      if (!data) return;
-      if (
-        data.status === "playing" &&
-        (currentIndex !== data.current_question_index || view !== "question")
-      ) {
-        void fetchQuestionData(data.current_question_index, data.expires_at);
-      } else if (data.status === "ranking" && view !== "ranking") {
-        void fetchRanking();
-        setView("ranking");
+
+      if (data) {
+        if (
+          data.status === "playing" &&
+          (currentIndex !== data.current_question_index || view !== "question")
+        ) {
+          void fetchQuestionData(data.current_question_index, data.expires_at);
+        } else if (data.status === "ranking" && view === "question") {
+          void fetchRanking();
+          setView("ranking");
+        }
+        // NOVO: Se o banco diz que acabou e o aluno ainda está na questão/ranking
+        else if (data.status === "finished" && view !== "gameover") {
+          void fetchMyScore().then(() => setView("gameover"));
+        }
       }
     }, 3000);
 
