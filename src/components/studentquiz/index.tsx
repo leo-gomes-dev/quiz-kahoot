@@ -43,8 +43,8 @@ export default function StudentQuiz({
   const [currentExpiresAt, setCurrentExpiresAt] = useState<string | null>(null);
 
   const lastSyncRef = useRef({ status: "", index: -1 });
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncRef = useRef<(data: GameStatusRow) => void>(() => {});
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const triggerVictory = useCallback((): void => {
     const end = Date.now() + 5000;
@@ -100,14 +100,17 @@ export default function StudentQuiz({
       if (data && data[index]) {
         const q = data[index];
         setQuestionDuration(q.timer || 10);
-        setTimeLeft(
-          expiresAt
-            ? Math.max(
-                0,
-                Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000),
-              )
-            : q.timer || 10,
-        );
+
+        // Cálculo inicial sincronizado
+        const initialDiff = expiresAt
+          ? Math.max(
+              0,
+              Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000) -
+                1,
+            )
+          : q.timer || 10;
+
+        setTimeLeft(initialDiff);
         setCurrentQuestion({
           id: q.id,
           text: q.text,
@@ -167,22 +170,27 @@ export default function StudentQuiz({
     [fetchQuestionData, fetchRanking, fetchMyScore, triggerVictory],
   );
 
-  // Sincroniza a Ref da função
+  // Atualiza ref da sincronia para o Realtime
   useEffect(() => {
     syncRef.current = syncGameState;
   }, [syncGameState]);
 
-  // CRONÔMETRO
+  // 🔥 CRONÔMETRO SINCRONIZADO (Corrigido e único)
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
+
     if (view === "question" && currentExpiresAt) {
       timerRef.current = setInterval(() => {
-        const diff = Math.max(
-          0,
-          Math.ceil((new Date(currentExpiresAt).getTime() - Date.now()) / 1000),
-        );
-        setTimeLeft(diff);
-        if (diff <= 0 && timerRef.current) clearInterval(timerRef.current);
+        const now = Date.now();
+        const end = new Date(currentExpiresAt).getTime();
+
+        // Compensação de 1s para bater com o professor
+        const diffValue = Math.max(0, Math.floor((end - now) / 1000) - 1);
+        setTimeLeft(diffValue);
+
+        if (diffValue <= 0 && timerRef.current) {
+          clearInterval(timerRef.current);
+        }
       }, 1000);
     }
     return () => {
@@ -190,11 +198,10 @@ export default function StudentQuiz({
     };
   }, [view, currentExpiresAt]);
 
+  // REALTIME IMORTAL
   useEffect(() => {
     let channel: RealtimeChannel;
-
     const setupChannel = () => {
-      // 🔥 Forçamos um nome único com timestamp para evitar cache de canal morto
       channel = supabase
         .channel(`game_room_${gameCode}_${Date.now()}`)
         .on<GameStatusRow>(
@@ -206,41 +213,26 @@ export default function StudentQuiz({
             filter: `game_code=eq.${gameCode}`,
           },
           (payload) => {
-            console.log("Sinal recebido!", payload.eventType);
-            if (payload.eventType === "DELETE") {
-              setShowProfessorLeft(true);
-            } else if (payload.new) {
-              syncRef.current(payload.new);
-            }
+            if (payload.eventType === "DELETE") setShowProfessorLeft(true);
+            else if (payload.new) syncRef.current(payload.new);
           },
         )
         .subscribe(async (status) => {
           if (status === "SUBSCRIBED") {
-            console.log("Conectado com sucesso!");
-            // Após conectar, buscamos o estado atual para garantir sincronia
             const { data } = await supabase
               .from("game_status")
               .select("*")
               .eq("game_code", gameCode)
               .maybeSingle();
             if (data) syncRef.current(data);
-            else if (status === "SUBSCRIBED") {
-              // Se não existe data e estamos inscritos, a sala pode ter caído
-              // mas vamos dar um tempo antes de expulsar
-            }
           }
         });
     };
-
     setupChannel();
-
     return () => {
-      if (channel) {
-        console.log("Limpando canal...");
-        void supabase.removeChannel(channel);
-      }
+      if (channel) void supabase.removeChannel(channel);
     };
-  }, [gameCode, onExit]); // Dependências mínimas
+  }, [gameCode]);
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white flex flex-col relative overflow-hidden font-nunito">
@@ -265,11 +257,7 @@ export default function StudentQuiz({
               setTimeout(() => setConfirmExit(false), 3000);
             } else onExit();
           }}
-          className={`px-6 py-2 rounded-xl font-black text-sm transition-all border-2 uppercase ${
-            confirmExit
-              ? "bg-yellow-400 text-indigo-900 border-yellow-600 animate-pulse shadow-[0_4px_0_0_#b58900]"
-              : "bg-red-500/20 text-red-200 border-red-500/50"
-          }`}
+          className={`px-6 py-2 rounded-xl font-black text-sm transition-all border-2 uppercase ${confirmExit ? "bg-yellow-400 text-indigo-900 border-yellow-600 animate-pulse shadow-[0_4px_0_0_#b58900]" : "bg-red-500/20 text-red-200 border-red-500/50"}`}
         >
           {confirmExit ? "CONFIRMAR?" : "Sair"}
         </button>

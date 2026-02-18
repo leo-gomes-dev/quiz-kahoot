@@ -20,9 +20,7 @@ export default function GameControl({
   const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
 
   const [isLobby, setIsLobby] = useState<boolean>(saved.isLobby ?? true);
-  // Altere para que o index inicial seja sempre 0 no primeiro carregamento do Lobby
   const [index, setIndex] = useState<number>(isLobby ? 0 : (saved.index ?? 0));
-
   const [showPodium, setShowPodium] = useState(false);
   const [isRankingMode, setIsRankingMode] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -34,6 +32,7 @@ export default function GameControl({
   const [blockCountdown, setBlockCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [questionDuration, setQuestionDuration] = useState(25);
+  const [exitStage, setExitStage] = useState(false); // 🔥 Estado único de saída
   const timerRef = useRef<number | null>(null);
 
   const fetchRanking = useCallback(async () => {
@@ -44,6 +43,28 @@ export default function GameControl({
       .order("score", { ascending: false });
     if (data) setLeaderboard(data as LeaderboardEntry[]);
   }, [gameCode]);
+
+  // 🔥 FUNÇÃO DE SAÍDA CONSOLIDADA (UI/UX + DELETE ALUNOS)
+  const handleCleanupAndExit = useCallback(async () => {
+    if (!exitStage) {
+      setExitStage(true);
+      setTimeout(() => setExitStage(false), 4000);
+      return;
+    }
+
+    if (timerRef.current) window.clearInterval(timerRef.current);
+
+    try {
+      // Deleta do banco para deslogar alunos instantaneamente
+      await supabase.from("leaderboard").delete().eq("game_code", gameCode);
+      await supabase.from("game_status").delete().eq("game_code", gameCode);
+      localStorage.removeItem(storageKey);
+      onFinish();
+    } catch (error) {
+      console.error("Erro ao encerrar:", error);
+      onFinish();
+    }
+  }, [gameCode, storageKey, onFinish, exitStage]);
 
   const handleRestartSameRoom = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
@@ -67,14 +88,6 @@ export default function GameControl({
     onReset();
   }, [gameCode, storageKey, onReset]);
 
-  const handleCleanupAndExit = useCallback(async () => {
-    if (timerRef.current) window.clearInterval(timerRef.current);
-    await supabase.from("leaderboard").delete().eq("game_code", gameCode);
-    await supabase.from("game_status").delete().eq("game_code", gameCode);
-    localStorage.removeItem(storageKey);
-    onFinish();
-  }, [gameCode, storageKey, onFinish]);
-
   const handleFinish = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
     setTimeLeft(null);
@@ -91,10 +104,9 @@ export default function GameControl({
     if (timerRef.current) window.clearInterval(timerRef.current);
     setTimeLeft(null);
 
-    // Se já terminamos as perguntas, vai para o pódio
     if (index >= questions.length - 1) return handleFinish();
 
-    // 1. SINALIZA RANKING (O Aluno vê o ranking da pergunta que ACABOU de passar)
+    // 🔥 1. SINALIZA RANKING PARA OS ALUNOS (Eles continuam vendo o ranking)
     await supabase
       .from("game_status")
       .update({
@@ -104,14 +116,14 @@ export default function GameControl({
       })
       .eq("game_code", gameCode);
 
+    // 🔥 2. ATUALIZA DADOS MAS NÃO MUDA A TELA DO PROFESSOR
     void fetchRanking();
-    setIsRankingMode(true);
+    // setIsRankingMode(true); <--- REMOVA OU COMENTE ESTA LINHA
 
-    // 2. INCREMENTA O ÍNDICE PARA A PRÓXIMA PERGUNTA
     const nextIdx = index + 1;
-    setIndex(nextIdx); // O estado muda AQUI, antes dos 5 segundos de countdown
+    setIndex(nextIdx);
 
-    // 3. DECIDE SE É BLOCO OU QUESTÃO COMUM
+    // 3. DECIDE SE VAI PARA BLOCO OU CONTAGEM REGRESSIVA
     if (nextIdx > 0 && nextIdx % 5 === 0) {
       setIsBlockTransition(true);
       setBlockCountdown(5);
@@ -124,14 +136,11 @@ export default function GameControl({
     setPreCountdown(null);
     setBlockCountdown(null);
     setIsBlockTransition(false);
+    setIsRankingMode(false);
 
-    // 🔥 CORREÇÃO REAL: Se o index for -1 (lobby), começamos no 0.
-    // Se já for >= 0, mantemos o index atual (pois o handleNext já preparou o terreno).
     const targetIdx = index < 0 ? 0 : index;
-
     if (targetIdx >= questions.length) return handleFinish();
 
-    // ATUALIZAÇÃO DE ESTADO LOCAL
     setIndex(targetIdx);
     if (isLobby) setIsLobby(false);
 
@@ -139,20 +148,14 @@ export default function GameControl({
       Date.now() + (questionDuration + 2) * 1000,
     ).toISOString();
 
-    // ATUALIZAÇÃO NO SUPABASE
-    const { error } = await supabase
+    await supabase
       .from("game_status")
       .update({
-        current_question_index: targetIdx, // Aqui vai o 0 real na primeira pergunta
+        current_question_index: targetIdx,
         status: "playing",
         expires_at: expiresAt,
       })
       .eq("game_code", gameCode);
-
-    if (error) {
-      console.error("Erro ao iniciar questão:", error.message);
-      return;
-    }
 
     setIsRankingMode(false);
 
@@ -180,15 +183,14 @@ export default function GameControl({
 
   useEffect(() => {
     const init = async () => {
-      localStorage.removeItem(storageKey); // Limpa cache local
-      setIndex(-1); // Estado inicial neutro
+      localStorage.removeItem(storageKey);
+      setIndex(0);
       setIsLobby(true);
-
       await supabase
         .from("game_status")
         .update({
           status: "lobby",
-          current_question_index: -1, // Banco em sincronia
+          current_question_index: -1,
           expires_at: null,
         })
         .eq("game_code", gameCode);
@@ -305,7 +307,7 @@ export default function GameControl({
               onToggleRanking={() => setIsRankingMode(!isRankingMode)}
               onShowGabarito={() => setShowGabaritoModal(true)}
               onExit={handleCleanupAndExit}
-              exitStage={false}
+              exitStage={exitStage}
             />
             {!isRankingMode && timeLeft !== null && preCountdown === null && (
               <div className="flex justify-center mb-6">

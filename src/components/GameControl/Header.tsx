@@ -23,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   return (
     <header className="relative z-50 flex flex-wrap justify-between items-center mb-10 bg-white/10 p-4 md:p-6 rounded-3xl border-b-4 border-black/20 w-full gap-3 text-white">
+      {/* LADO ESQUERDO: SALA E RANKING */}
       <div className="flex items-center gap-2">
         <button
           onClick={(e) => {
@@ -45,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
+      {/* CENTRO: GABARITO */}
       <button
         onClick={onShowGabarito}
         className="bg-black/40 text-yellow-400 px-4 py-2 rounded-xl font-black text-xs border border-yellow-400/20 active:translate-y-1 cursor-pointer flex items-center gap-2"
@@ -52,19 +54,24 @@ export const Header: React.FC<HeaderProps> = ({
         <span>👁️</span> GABARITO
       </button>
 
-      <div className="flex items-center gap-2">
+      {/* LADO DIREITO: QUESTÃO E SAIR */}
+      <div className="flex items-center gap-4">
         <div className="text-right">
-          <p className="text-[10px] font-black opacity-50 uppercase">Questão</p>
-          <p className="text-sm font-black">
+          <p className="text-[10px] font-black opacity-50 uppercase tracking-tighter">
+            Questão
+          </p>
+          <p className="text-sm font-black leading-none">
             {index + 1}/{totalQuestions}
           </p>
         </div>
+
+        {/* BOTÃO SAIR COM UI/UX DE CONFIRMAÇÃO */}
         <button
           onClick={onExit}
-          className={`px-3 py-2 rounded-xl font-black text-xs transition-all cursor-pointer ${
+          className={`px-5 py-2 rounded-xl font-black text-xs transition-all cursor-pointer border-b-4 active:translate-y-1 active:border-b-0 uppercase ${
             exitStage
-              ? "bg-yellow-400 text-indigo-900 animate-pulse shadow-[0_4px_0_0_#b58900]"
-              : "bg-[#e21b3c] text-white shadow-[0_4_0_0_#a0132b]"
+              ? "bg-yellow-400 text-indigo-900 animate-pulse border-yellow-600 shadow-[0_4px_0_0_#b58900]"
+              : "bg-[#e21b3c] text-white border-[#a0132b] shadow-[0_4px_0_0_#a0132b]"
           }`}
         >
           {exitStage ? "CONFIRMAR?" : "SAIR"}
