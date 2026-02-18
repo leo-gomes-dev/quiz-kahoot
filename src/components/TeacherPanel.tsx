@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import LeoGomesFooter from "./Footer";
+import LeoGomesFooter from "./footer";
 
 // --- INTERFACES ---
 interface Question {
