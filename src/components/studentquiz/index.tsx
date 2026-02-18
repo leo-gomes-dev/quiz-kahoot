@@ -40,7 +40,6 @@ export default function StudentQuiz({
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [questionDuration, setQuestionDuration] = useState<number>(10);
   const [showProfessorLeft, setShowProfessorLeft] = useState(false);
-
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const triggerVictory = useCallback((): void => {
@@ -247,8 +246,59 @@ export default function StudentQuiz({
     triggerVictory,
   ]);
 
+  const lastSyncRef = useRef({ status: "", index: -1 });
+
+  const syncGameState = useCallback(
+    async (data: GameStatusRow) => {
+      if (!data) return;
+
+      // 🔥 TRAVA DE SEGURANÇA: Só atualiza se algo REALMENTE mudou no banco
+      if (
+        data.status === lastSyncRef.current.status &&
+        Number(data.current_question_index) === lastSyncRef.current.index
+      ) {
+        return;
+      }
+
+      // Atualiza a referência da última sincronia
+      lastSyncRef.current = {
+        status: data.status,
+        index: Number(data.current_question_index),
+      };
+
+      switch (data.status) {
+        case "playing":
+          // Só muda para a pergunta se o aluno não estiver nela ou se mudou o índice
+          setIsPreparing(false);
+          void fetchQuestionData(
+            Number(data.current_question_index),
+            data.expires_at,
+          );
+          break;
+
+        case "ranking":
+          setIsPreparing(false);
+          await fetchRanking();
+          setView("ranking");
+          break;
+
+        case "started":
+          setIsPreparing(true);
+          setView("loading");
+          break;
+
+        case "finished":
+          await fetchMyScore();
+          setView("gameover");
+          triggerVictory();
+          break;
+      }
+    },
+    [gameCode, fetchQuestionData, fetchRanking, fetchMyScore, triggerVictory],
+  );
+
   useEffect(() => {
-    // 1. CANAL REALTIME (Ouvido rápido)
+    // CANAL REALTIME (Mais rápido)
     const channel = supabase
       .channel(`game_${gameCode}`)
       .on<GameStatusRow>(
@@ -263,33 +313,8 @@ export default function StudentQuiz({
       )
       .subscribe();
 
-    // 2. FUNÇÃO DE SINCRONIA (A mesma para Realtime e Polling)
-    const syncGameState = async (data: GameStatusRow) => {
-      if (!data) return;
-
-      // Se o status for playing e o índice mudou, força a busca
-      if (data.status === "playing") {
-        setIsPreparing(false);
-        // Só busca se o índice for diferente do atual para não dar loop
-        void fetchQuestionData(
-          Number(data.current_question_index),
-          data.expires_at,
-        );
-      } else if (data.status === "ranking") {
-        setIsPreparing(false);
-        await fetchRanking();
-        setView("ranking");
-      } else if (data.status === "started") {
-        setIsPreparing(true);
-        setView("loading");
-      } else if (data.status === "finished") {
-        setView("gameover");
-        triggerVictory();
-      }
-    };
-
-    // 3. 🔥 FORÇA BRUTA: Polling de Segurança (Checa a cada 2 segundos)
-    // Isso garante que mesmo que o Realtime falhe, o aluno mude de tela sozinho
+    // POLLING DE SEGURANÇA (Mais lento - 3 segundos)
+    // Aumentamos o tempo para 3s para dar prioridade total ao Realtime
     const safetyNet = setInterval(async () => {
       const { data } = await supabase
         .from("game_status")
@@ -297,14 +322,14 @@ export default function StudentQuiz({
         .eq("game_code", gameCode)
         .maybeSingle();
 
-      if (data) syncGameState(data);
-    }, 2000);
+      if (data) void syncGameState(data);
+    }, 3000);
 
     return () => {
       void supabase.removeChannel(channel);
       clearInterval(safetyNet);
     };
-  }, [gameCode, fetchQuestionData, fetchRanking, fetchMyScore]);
+  }, [gameCode, syncGameState]);
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
