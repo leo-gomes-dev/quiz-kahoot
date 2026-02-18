@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import { RealtimeChannel } from "@supabase/supabase-js";
 import confetti from "canvas-confetti";
 import LeoGomesFooter from "../footer";
 import { QuestionScreen } from "./QuestionScreen";
@@ -34,7 +35,7 @@ export default function StudentQuiz({
   const [playerScore, setPlayerScore] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState<number>(-1);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [questionDuration, setQuestionDuration] = useState<number>(10);
@@ -43,6 +44,7 @@ export default function StudentQuiz({
 
   const lastSyncRef = useRef({ status: "", index: -1 });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncRef = useRef<(data: GameStatusRow) => void>(() => {});
 
   const triggerVictory = useCallback((): void => {
     const end = Date.now() + 5000;
@@ -94,9 +96,18 @@ export default function StudentQuiz({
         .select("*")
         .eq("game_code", gameCode)
         .order("created_at", { ascending: true });
+
       if (data && data[index]) {
         const q = data[index];
         setQuestionDuration(q.timer || 10);
+        setTimeLeft(
+          expiresAt
+            ? Math.max(
+                0,
+                Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000),
+              )
+            : q.timer || 10,
+        );
         setCurrentQuestion({
           id: q.id,
           text: q.text,
@@ -156,7 +167,12 @@ export default function StudentQuiz({
     [fetchQuestionData, fetchRanking, fetchMyScore, triggerVictory],
   );
 
-  // 🔥 CRONÔMETRO ÚNICO (Tipagem ReturnType)
+  // Sincroniza a Ref da função
+  useEffect(() => {
+    syncRef.current = syncGameState;
+  }, [syncGameState]);
+
+  // CRONÔMETRO
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (view === "question" && currentExpiresAt) {
@@ -174,69 +190,95 @@ export default function StudentQuiz({
     };
   }, [view, currentExpiresAt]);
 
-  // 🔥 REALTIME (Restaurado para o aluno não ficar preso)
   useEffect(() => {
-    const channel = supabase
-      .channel(`game_room_${gameCode}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_status",
-          filter: `game_code=eq.${gameCode}`,
-        },
-        (payload) => {
-          if (payload.eventType === "DELETE") setShowProfessorLeft(true);
-          else syncGameState(payload.new as GameStatusRow);
-        },
-      )
-      .subscribe();
+    let channel: RealtimeChannel;
 
-    const init = async () => {
-      const { data } = await supabase
-        .from("game_status")
-        .select("*")
-        .eq("game_code", gameCode)
-        .maybeSingle();
-      if (!data) onExit();
-      else syncGameState(data);
+    const setupChannel = () => {
+      // 🔥 Forçamos um nome único com timestamp para evitar cache de canal morto
+      channel = supabase
+        .channel(`game_room_${gameCode}_${Date.now()}`)
+        .on<GameStatusRow>(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "game_status",
+            filter: `game_code=eq.${gameCode}`,
+          },
+          (payload) => {
+            console.log("Sinal recebido!", payload.eventType);
+            if (payload.eventType === "DELETE") {
+              setShowProfessorLeft(true);
+            } else if (payload.new) {
+              syncRef.current(payload.new);
+            }
+          },
+        )
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            console.log("Conectado com sucesso!");
+            // Após conectar, buscamos o estado atual para garantir sincronia
+            const { data } = await supabase
+              .from("game_status")
+              .select("*")
+              .eq("game_code", gameCode)
+              .maybeSingle();
+            if (data) syncRef.current(data);
+            else if (status === "SUBSCRIBED") {
+              // Se não existe data e estamos inscritos, a sala pode ter caído
+              // mas vamos dar um tempo antes de expulsar
+            }
+          }
+        });
     };
-    void init();
+
+    setupChannel();
+
     return () => {
-      void supabase.removeChannel(channel);
+      if (channel) {
+        console.log("Limpando canal...");
+        void supabase.removeChannel(channel);
+      }
     };
-  }, [gameCode, syncGameState, onExit]);
+  }, [gameCode, onExit]); // Dependências mínimas
 
   return (
-    <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-[#46178f] text-white flex flex-col relative overflow-hidden font-nunito">
       <header className="w-full p-4 flex justify-between items-center bg-black/40 backdrop-blur-md z-40 sticky top-0 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20 shadow-lg text-white">
+          <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20">
             {playerName.charAt(0).toUpperCase()}
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-[10px] font-black uppercase text-purple-300 tracking-widest leading-none opacity-70">
+            <span className="text-[10px] font-black uppercase text-purple-300 opacity-70">
               Jogador
             </span>
-            <span className="text-lg font-black leading-tight text-white">
+            <span className="text-lg font-black leading-tight">
               {playerName}
             </span>
           </div>
         </div>
         <button
-          onClick={() => setShowExitConfirm(true)}
-          className="px-6 py-2 bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white rounded-xl font-black text-sm border-2 border-red-500/50 uppercase transition-all"
+          onClick={() => {
+            if (!confirmExit) {
+              setConfirmExit(true);
+              setTimeout(() => setConfirmExit(false), 3000);
+            } else onExit();
+          }}
+          className={`px-6 py-2 rounded-xl font-black text-sm transition-all border-2 uppercase ${
+            confirmExit
+              ? "bg-yellow-400 text-indigo-900 border-yellow-600 animate-pulse shadow-[0_4px_0_0_#b58900]"
+              : "bg-red-500/20 text-red-200 border-red-500/50"
+          }`}
         >
-          Sair
+          {confirmExit ? "CONFIRMAR?" : "Sair"}
         </button>
       </header>
 
-      {/* MODAL PROFESSOR SAIU */}
       {showProfessorLeft && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-[3rem] p-10 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
-            <h3 className="text-2xl font-black uppercase mb-4 leading-tight text-red-600">
+            <h3 className="text-2xl font-black uppercase mb-4 text-red-600 tracking-tighter">
               A sala foi encerrada!
             </h3>
             <button
@@ -245,31 +287,6 @@ export default function StudentQuiz({
             >
               Voltar ao Início
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL SAIR CONFIRMAÇÃO */}
-      {showExitConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
-            <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter">
-              Deseja sair?
-            </h3>
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={onExit}
-                className="w-full py-4 bg-red-600 text-white rounded-xl font-black uppercase shadow-[0_4px_0_0_#991b1b]"
-              >
-                Sim, Sair
-              </button>
-              <button
-                onClick={() => setShowExitConfirm(false)}
-                className="w-full py-4 bg-gray-100 text-gray-500 rounded-xl font-black uppercase"
-              >
-                Cancelar
-              </button>
-            </div>
           </div>
         </div>
       )}

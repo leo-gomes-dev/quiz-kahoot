@@ -1,4 +1,3 @@
-// src/components/GameControl/Header.tsx
 import React from "react";
 
 interface HeaderProps {
@@ -8,7 +7,7 @@ interface HeaderProps {
   exitStage: boolean;
   onShowCode: () => void;
   onToggleRanking: () => void;
-  onShowGabarito: () => void; // Verifique se esta prop existe
+  onShowGabarito: () => void;
   onExit: (e: React.MouseEvent) => void;
 }
 
@@ -23,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExit,
 }) => {
   return (
-    <header className="relative z-50 flex flex-wrap justify-between items-center mb-10 bg-white/10 p-4 md:p-6 rounded-3xl border-b-4 border-black/20 w-full gap-3">
+    <header className="relative z-50 flex flex-wrap justify-between items-center mb-10 bg-white/10 p-4 md:p-6 rounded-3xl border-b-4 border-black/20 w-full gap-3 text-white">
       <div className="flex items-center gap-2">
         <button
           onClick={(e) => {
@@ -46,7 +45,6 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* BOTÃO DE GABARITO (Verifique se aparece agora) */}
       <button
         onClick={onShowGabarito}
         className="bg-black/40 text-yellow-400 px-4 py-2 rounded-xl font-black text-xs border border-yellow-400/20 active:translate-y-1 cursor-pointer flex items-center gap-2"
@@ -65,8 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onExit}
           className={`px-3 py-2 rounded-xl font-black text-xs transition-all cursor-pointer ${
             exitStage
-              ? "bg-yellow-400 text-indigo-900 animate-pulse"
-              : "bg-[#e21b3c] text-white shadow-[0_4px_0_0_#a0132b]"
+              ? "bg-yellow-400 text-indigo-900 animate-pulse shadow-[0_4px_0_0_#b58900]"
+              : "bg-[#e21b3c] text-white shadow-[0_4_0_0_#a0132b]"
           }`}
         >
           {exitStage ? "CONFIRMAR?" : "SAIR"}

@@ -44,6 +44,7 @@ export default function TeacherPanel({
   const [expandedLibBlock, setExpandedLibBlock] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmExit, setConfirmExit] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [blockName, setBlockName] = useState("Meu Bloco 🚀");
@@ -199,15 +200,47 @@ export default function TeacherPanel({
         <header className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12 bg-white/10 p-6 rounded-[2rem] border-b-8 border-black/20">
           <div className="flex items-center gap-4">
             <button
-              onClick={onBack}
-              className="bg-white/10 p-3 rounded-2xl hover:bg-red-500 font-black text-[10px]"
+              onClick={async () => {
+                if (!confirmExit) {
+                  setConfirmExit(true);
+                  setTimeout(() => setConfirmExit(false), 3000);
+                } else {
+                  try {
+                    // 🔥 BUSCA O CÓDIGO ATIVO PARA DELETAR E DESLOGAR ALUNOS
+                    // Se você já tiver uma variável chamada 'gameCode', use-a direto.
+                    // Caso contrário, usamos a busca abaixo:
+                    const { data: currentRoom } = await supabase
+                      .from("game_status")
+                      .select("game_code")
+                      .maybeSingle();
+
+                    if (currentRoom?.game_code) {
+                      await supabase
+                        .from("game_status")
+                        .delete()
+                        .eq("game_code", currentRoom.game_code);
+                      console.log("Sala encerrada e alunos avisados!");
+                    }
+                  } catch (error) {
+                    console.error("Erro ao encerrar sala:", error);
+                  }
+                  onBack(); // Sai da tela
+                }
+              }}
+              className={`p-3 px-6 rounded-2xl font-black text-[12px] transition-all uppercase shadow-lg ${
+                confirmExit
+                  ? "bg-yellow-400 text-indigo-900 animate-pulse shadow-[0_4px_0_0_#b58900]"
+                  : "bg-white/10 hover:bg-red-500 text-white"
+              }`}
             >
-              SAIR
+              {confirmExit ? "CONFIRMAR SAÍDA?" : "SAIR"}
             </button>
-            <h1 className="text-3xl font-black italic text-yellow-400">
+
+            <h1 className="text-3xl font-black italic text-yellow-400 tracking-tighter">
               TEACHER PANEL 🍎
             </h1>
           </div>
+
           <div className="flex bg-black/20 p-2 rounded-3xl">
             <button
               onClick={() => setView("setup")}
