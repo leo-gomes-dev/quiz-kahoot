@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { RealtimeChannel } from "@supabase/supabase-js"; // 🔥 TIPAGEM CORRETA
 import confetti from "canvas-confetti";
 import LeoGomesFooter from "../footer";
 import { QuestionScreen } from "./QuestionScreen";
@@ -41,6 +41,8 @@ export default function StudentQuiz({
   const [questionDuration, setQuestionDuration] = useState<number>(10);
   const [showProfessorLeft, setShowProfessorLeft] = useState(false);
 
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
   const triggerVictory = useCallback((): void => {
     const end = Date.now() + 5000;
     const interval = window.setInterval(() => {
@@ -76,7 +78,6 @@ export default function StudentQuiz({
 
   const fetchQuestionData = useCallback(
     async (index: number, expiresAt?: string | null) => {
-      // 🔥 CORREÇÃO EXTRA: Se for lobby ou reset, não carrega pergunta
       if (index < 0) {
         setView("loading");
         setCurrentQuestion(null);
@@ -126,6 +127,10 @@ export default function StudentQuiz({
   );
 
   useEffect(() => {
+    if (channelRef.current) {
+      void supabase.removeChannel(channelRef.current);
+    }
+
     const channel = supabase
       .channel(`room_${gameCode}`)
       .on<GameStatusRow>(
@@ -136,7 +141,7 @@ export default function StudentQuiz({
           table: "game_status",
           filter: `game_code=eq.${gameCode}`,
         },
-        async (payload: RealtimePostgresChangesPayload<GameStatusRow>) => {
+        async (payload) => {
           if (payload.eventType === "DELETE") {
             setShowProfessorLeft(true);
             return;
@@ -151,30 +156,39 @@ export default function StudentQuiz({
               setIsPreparing(false);
               break;
 
+            case "started": {
+              setIsPreparing(true);
+              setView("loading");
+              // Check preventivo para não perder o timing se o playing vier muito rápido
+              const { data: sync } = await supabase
+                .from("game_status")
+                .select("*")
+                .eq("game_code", gameCode)
+                .maybeSingle();
+              if (sync?.status === "playing") {
+                setIsPreparing(false);
+                void fetchQuestionData(
+                  Number(sync.current_question_index),
+                  sync.expires_at,
+                );
+              }
+              break;
+            }
+
+            case "playing": {
+              setIsPreparing(false);
+              const newIndex = Number(newData.current_question_index);
+              if (newIndex >= 0) {
+                void fetchQuestionData(newIndex, newData.expires_at);
+              }
+              break;
+            }
+
             case "ranking":
               setIsPreparing(false);
               await fetchRanking();
               setView("ranking");
               break;
-
-            case "started":
-              // Apenas feedback visual
-              setIsPreparing(true);
-              setView("loading");
-              break;
-
-            case "playing": {
-              setIsPreparing(false);
-
-              const newIndex = Number(newData.current_question_index);
-
-              // 🔥 Só atualiza se realmente mudou de pergunta
-              if (newIndex !== currentIndex) {
-                void fetchQuestionData(newIndex, newData.expires_at);
-              }
-
-              break;
-            }
 
             case "finished":
               await fetchMyScore();
@@ -186,53 +200,46 @@ export default function StudentQuiz({
       )
       .subscribe();
 
+    channelRef.current = channel;
+
     const init = async () => {
       const { data } = await supabase
         .from("game_status")
         .select("*")
         .eq("game_code", gameCode)
         .maybeSingle();
-
       if (!data) {
         onExit();
         return;
       }
 
-      switch (data.status) {
-        case "playing":
-          void fetchQuestionData(data.current_question_index, data.expires_at);
-          break;
-
-        case "ranking":
-          await fetchRanking();
-          setView("ranking");
-          break;
-
-        case "finished":
-          await fetchMyScore();
-          setView("gameover");
-          triggerVictory();
-          break;
-
-        case "started":
-          setIsPreparing(true);
-          setView("loading");
-          break;
-
-        default:
-          setView("loading");
-          setIsPreparing(false);
+      if (data.status === "playing") {
+        void fetchQuestionData(
+          Number(data.current_question_index),
+          data.expires_at,
+        );
+      } else if (data.status === "ranking") {
+        await fetchRanking();
+        setView("ranking");
+      } else if (data.status === "finished") {
+        await fetchMyScore();
+        setView("gameover");
+        triggerVictory();
+      } else {
+        setView("loading");
+        setIsPreparing(data.status === "started");
       }
     };
 
     void init();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        void supabase.removeChannel(channelRef.current);
+      }
     };
   }, [
     gameCode,
-    currentIndex, // 🔥 IMPORTANTE
     onExit,
     fetchQuestionData,
     fetchRanking,
@@ -241,26 +248,112 @@ export default function StudentQuiz({
   ]);
 
   useEffect(() => {
-    let timer: number | undefined;
-    if (view === "question" && timeLeft > 0 && !answered) {
-      timer = window.setInterval(
-        () => setTimeLeft((p) => (p > 0 ? p - 1 : 0)),
-        1000,
-      );
-    }
-    return () => {
-      if (timer) window.clearInterval(timer);
+    // 1. Criar canal persistente
+    const channel = supabase
+      .channel(`room_${gameCode}`)
+      .on<GameStatusRow>(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_status",
+          filter: `game_code=eq.${gameCode}`,
+        },
+        async (payload) => {
+          // Log para debug em produção - cheque o console do Chrome
+          console.log("MUDANÇA RECEBIDA:", payload.new);
+
+          if (payload.eventType === "DELETE") {
+            setShowProfessorLeft(true);
+            return;
+          }
+
+          const newData = payload.new as GameStatusRow;
+          if (!newData) return;
+
+          // REAÇÃO IMEDIATA AOS STATUS
+          if (newData.status === "playing") {
+            setIsPreparing(false);
+            void fetchQuestionData(
+              Number(newData.current_question_index),
+              newData.expires_at,
+            );
+          } else if (newData.status === "ranking") {
+            setIsPreparing(false);
+            await fetchRanking();
+            setView("ranking");
+          } else if (newData.status === "started") {
+            setIsPreparing(true);
+            setView("loading");
+
+            // Check de segurança: se o sinal de 'playing' já passou
+            const { data: check } = await supabase
+              .from("game_status")
+              .select("*")
+              .eq("game_code", gameCode)
+              .maybeSingle();
+
+            if (check?.status === "playing") {
+              setIsPreparing(false);
+              void fetchQuestionData(
+                Number(check.current_question_index),
+                check.expires_at,
+              );
+            }
+          } else if (newData.status === "finished") {
+            await fetchMyScore();
+            setView("gameover");
+            triggerVictory();
+          }
+        },
+      )
+      .subscribe((status) => {
+        console.log("STATUS DA CONEXÃO:", status);
+      });
+
+    // 2. Init para quem entrou com o bonde andando
+    const init = async () => {
+      const { data } = await supabase
+        .from("game_status")
+        .select("*")
+        .eq("game_code", gameCode)
+        .maybeSingle();
+
+      if (!data) return onExit();
+
+      if (data.status === "playing") {
+        void fetchQuestionData(
+          Number(data.current_question_index),
+          data.expires_at,
+        );
+      } else if (data.status === "ranking") {
+        await fetchRanking();
+        setView("ranking");
+      } else if (data.status === "finished") {
+        setView("gameover");
+      } else {
+        setView("loading");
+        setIsPreparing(data.status === "started");
+      }
     };
-  }, [view, timeLeft, answered]);
+
+    void init();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // REMOVIDO TUDO QUE FAZIA O CANAL RESETAR
+  }, [gameCode]); // CANAL SÓ DEPENDE DO CÓDIGO DA SALA
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
+      {/* HEADER ÚNICO */}
       <header className="w-full p-4 flex justify-between items-center bg-black/40 backdrop-blur-md z-40 sticky top-0 border-b border-white/10">
-        <div className="flex items-center gap-3 text-left">
-          <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20 shadow-lg">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20 shadow-lg text-white">
             {playerName.charAt(0).toUpperCase()}
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col text-left">
             <span className="text-[10px] font-black uppercase text-purple-300 tracking-widest leading-none opacity-70">
               Jogador
             </span>
@@ -281,8 +374,8 @@ export default function StudentQuiz({
       {showProfessorLeft && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-[3rem] p-10 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
-            <h3 className="text-2xl font-black uppercase mb-4 leading-tight">
-              O professor encerrou a sala!
+            <h3 className="text-2xl font-black uppercase mb-4 leading-tight text-red-600">
+              A sala foi encerrada!
             </h3>
             <button
               onClick={onExit}
@@ -299,7 +392,7 @@ export default function StudentQuiz({
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
             <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter">
-              Deseja sair da partida?
+              Deseja sair?
             </h3>
             <div className="flex flex-col gap-3">
               <button
@@ -334,18 +427,18 @@ export default function StudentQuiz({
 
         {view === "question" && currentQuestion && (
           <QuestionScreen
-            key={`q-${currentIndex}`} // FIM DA NECESSIDADE DE F5
+            key={`q-${currentIndex}`}
             question={currentQuestion}
             gameCode={gameCode}
             playerScore={playerScore}
             answered={answered}
             isCorrect={isCorrect}
             selectedChoice={selectedChoice}
-            onAnswer={async (c: string) => {
+            onAnswer={async (choice: string) => {
               if (answered) return;
               setAnswered(true);
-              setSelectedChoice(c);
-              if (c === currentQuestion.correctOption) {
+              setSelectedChoice(choice);
+              if (choice === currentQuestion.correctOption) {
                 setIsCorrect(true);
                 await supabase.rpc("increment_score", {
                   p_game_code: gameCode,
