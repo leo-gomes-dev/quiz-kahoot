@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import { RealtimeChannel } from "@supabase/supabase-js"; // 🔥 TIPAGEM CORRETA
 import confetti from "canvas-confetti";
 import LeoGomesFooter from "../footer";
 import { QuestionScreen } from "./QuestionScreen";
@@ -40,7 +39,10 @@ export default function StudentQuiz({
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [questionDuration, setQuestionDuration] = useState<number>(10);
   const [showProfessorLeft, setShowProfessorLeft] = useState(false);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const [currentExpiresAt, setCurrentExpiresAt] = useState<string | null>(null);
+
+  const lastSyncRef = useRef({ status: "", index: -1 });
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const triggerVictory = useCallback((): void => {
     const end = Date.now() + 5000;
@@ -79,33 +81,22 @@ export default function StudentQuiz({
     async (index: number, expiresAt?: string | null) => {
       if (index < 0) {
         setView("loading");
-        setCurrentQuestion(null);
         return;
       }
-
       setAnswered(false);
       setIsCorrect(null);
       setSelectedChoice(null);
       setCurrentIndex(index);
+      setCurrentExpiresAt(expiresAt || null);
 
       const { data } = await supabase
         .from("questions")
         .select("*")
         .eq("game_code", gameCode)
         .order("created_at", { ascending: true });
-
       if (data && data[index]) {
         const q = data[index];
-        const duration = q.timer || 10;
-        setQuestionDuration(duration);
-        setTimeLeft(
-          expiresAt
-            ? Math.max(
-                0,
-                Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
-              )
-            : duration,
-        );
+        setQuestionDuration(q.timer || 10);
         setCurrentQuestion({
           id: q.id,
           text: q.text,
@@ -125,142 +116,14 @@ export default function StudentQuiz({
     [gameCode, fetchMyScore],
   );
 
-  useEffect(() => {
-    if (channelRef.current) {
-      void supabase.removeChannel(channelRef.current);
-    }
-
-    const channel = supabase
-      .channel(`room_${gameCode}`)
-      .on<GameStatusRow>(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_status",
-          filter: `game_code=eq.${gameCode}`,
-        },
-        async (payload) => {
-          if (payload.eventType === "DELETE") {
-            setShowProfessorLeft(true);
-            return;
-          }
-
-          const newData = payload.new as GameStatusRow;
-          if (!newData) return;
-
-          switch (newData.status) {
-            case "lobby":
-              setView("loading");
-              setIsPreparing(false);
-              break;
-
-            case "started": {
-              setIsPreparing(true);
-              setView("loading");
-              // Check preventivo para não perder o timing se o playing vier muito rápido
-              const { data: sync } = await supabase
-                .from("game_status")
-                .select("*")
-                .eq("game_code", gameCode)
-                .maybeSingle();
-              if (sync?.status === "playing") {
-                setIsPreparing(false);
-                void fetchQuestionData(
-                  Number(sync.current_question_index),
-                  sync.expires_at,
-                );
-              }
-              break;
-            }
-
-            case "playing": {
-              setIsPreparing(false);
-              const newIndex = Number(newData.current_question_index);
-              if (newIndex >= 0) {
-                void fetchQuestionData(newIndex, newData.expires_at);
-              }
-              break;
-            }
-
-            case "ranking":
-              setIsPreparing(false);
-              await fetchRanking();
-              setView("ranking");
-              break;
-
-            case "finished":
-              await fetchMyScore();
-              setView("gameover");
-              triggerVictory();
-              break;
-          }
-        },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-
-    const init = async () => {
-      const { data } = await supabase
-        .from("game_status")
-        .select("*")
-        .eq("game_code", gameCode)
-        .maybeSingle();
-      if (!data) {
-        onExit();
-        return;
-      }
-
-      if (data.status === "playing") {
-        void fetchQuestionData(
-          Number(data.current_question_index),
-          data.expires_at,
-        );
-      } else if (data.status === "ranking") {
-        await fetchRanking();
-        setView("ranking");
-      } else if (data.status === "finished") {
-        await fetchMyScore();
-        setView("gameover");
-        triggerVictory();
-      } else {
-        setView("loading");
-        setIsPreparing(data.status === "started");
-      }
-    };
-
-    void init();
-
-    return () => {
-      if (channelRef.current) {
-        void supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [
-    gameCode,
-    onExit,
-    fetchQuestionData,
-    fetchRanking,
-    fetchMyScore,
-    triggerVictory,
-  ]);
-
-  const lastSyncRef = useRef({ status: "", index: -1 });
-
   const syncGameState = useCallback(
     async (data: GameStatusRow) => {
       if (!data) return;
-
-      // 🔥 TRAVA DE SEGURANÇA: Só atualiza se algo REALMENTE mudou no banco
       if (
         data.status === lastSyncRef.current.status &&
         Number(data.current_question_index) === lastSyncRef.current.index
-      ) {
+      )
         return;
-      }
-
-      // Atualiza a referência da última sincronia
       lastSyncRef.current = {
         status: data.status,
         index: Number(data.current_question_index),
@@ -268,72 +131,85 @@ export default function StudentQuiz({
 
       switch (data.status) {
         case "playing":
-          // Só muda para a pergunta se o aluno não estiver nela ou se mudou o índice
           setIsPreparing(false);
           void fetchQuestionData(
             Number(data.current_question_index),
             data.expires_at,
           );
           break;
-
         case "ranking":
           setIsPreparing(false);
           await fetchRanking();
           setView("ranking");
           break;
-
-        case "started":
-          setIsPreparing(true);
-          setView("loading");
-          break;
-
         case "finished":
           await fetchMyScore();
           setView("gameover");
           triggerVictory();
           break;
+        default:
+          setView("loading");
+          setIsPreparing(data.status === "started");
+          break;
       }
     },
-    [gameCode, fetchQuestionData, fetchRanking, fetchMyScore, triggerVictory],
+    [fetchQuestionData, fetchRanking, fetchMyScore, triggerVictory],
   );
 
+  // 🔥 CRONÔMETRO ÚNICO (Tipagem ReturnType)
   useEffect(() => {
-    // CANAL REALTIME (Mais rápido)
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (view === "question" && currentExpiresAt) {
+      timerRef.current = setInterval(() => {
+        const diff = Math.max(
+          0,
+          Math.ceil((new Date(currentExpiresAt).getTime() - Date.now()) / 1000),
+        );
+        setTimeLeft(diff);
+        if (diff <= 0 && timerRef.current) clearInterval(timerRef.current);
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [view, currentExpiresAt]);
+
+  // 🔥 REALTIME (Restaurado para o aluno não ficar preso)
+  useEffect(() => {
     const channel = supabase
-      .channel(`game_${gameCode}`)
-      .on<GameStatusRow>(
+      .channel(`game_room_${gameCode}`)
+      .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "game_status",
           filter: `game_code=eq.${gameCode}`,
         },
-        (payload) => syncGameState(payload.new as GameStatusRow),
+        (payload) => {
+          if (payload.eventType === "DELETE") setShowProfessorLeft(true);
+          else syncGameState(payload.new as GameStatusRow);
+        },
       )
       .subscribe();
 
-    // POLLING DE SEGURANÇA (Mais lento - 3 segundos)
-    // Aumentamos o tempo para 3s para dar prioridade total ao Realtime
-    const safetyNet = setInterval(async () => {
+    const init = async () => {
       const { data } = await supabase
         .from("game_status")
         .select("*")
         .eq("game_code", gameCode)
         .maybeSingle();
-
-      if (data) void syncGameState(data);
-    }, 3000);
-
+      if (!data) onExit();
+      else syncGameState(data);
+    };
+    void init();
     return () => {
       void supabase.removeChannel(channel);
-      clearInterval(safetyNet);
     };
-  }, [gameCode, syncGameState]);
+  }, [gameCode, syncGameState, onExit]);
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
-      {/* HEADER ÚNICO */}
       <header className="w-full p-4 flex justify-between items-center bg-black/40 backdrop-blur-md z-40 sticky top-0 border-b border-white/10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20 shadow-lg text-white">
@@ -350,7 +226,7 @@ export default function StudentQuiz({
         </div>
         <button
           onClick={() => setShowExitConfirm(true)}
-          className="px-6 py-2 bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white rounded-xl font-black text-sm transition-all border-2 border-red-500/50 uppercase"
+          className="px-6 py-2 bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white rounded-xl font-black text-sm border-2 border-red-500/50 uppercase transition-all"
         >
           Sair
         </button>
@@ -406,11 +282,9 @@ export default function StudentQuiz({
             isPreparing={isPreparing}
           />
         )}
-
         {view === "ranking" && (
           <RankingScreen leaderboard={leaderboard} playerName={playerName} />
         )}
-
         {view === "question" && currentQuestion && (
           <QuestionScreen
             key={`q-${currentIndex}`}
@@ -420,8 +294,10 @@ export default function StudentQuiz({
             answered={answered}
             isCorrect={isCorrect}
             selectedChoice={selectedChoice}
-            onAnswer={async (choice: string) => {
-              if (answered) return;
+            timeLeft={timeLeft}
+            duration={questionDuration}
+            onAnswer={async (choice) => {
+              if (answered || timeLeft <= 0) return;
               setAnswered(true);
               setSelectedChoice(choice);
               if (choice === currentQuestion.correctOption) {
@@ -434,11 +310,8 @@ export default function StudentQuiz({
                 void fetchMyScore();
               } else setIsCorrect(false);
             }}
-            timeLeft={timeLeft}
-            duration={questionDuration}
           />
         )}
-
         {view === "gameover" && (
           <GameOverScreen
             playerName={playerName}
@@ -447,7 +320,6 @@ export default function StudentQuiz({
           />
         )}
       </main>
-
       <LeoGomesFooter />
     </div>
   );
