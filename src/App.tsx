@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./lib/supabase";
-import Home from "./components/home";
-import TeacherPanel from "./components/TeacherPanel";
-import StudentJoin from "./components/studentquiz/StudentJoin";
-import GameControl from "./components/GameControl";
-import StudentQuiz from "./components/studentquiz";
+import Home from "./home";
+import TeacherPanel from "./teacher";
+import StudentJoin from "./student/components/StudentJoin";
+import GameControl from "./GameControl";
+import StudentQuiz from "./student";
 
 type ScreenNames =
   | "home"

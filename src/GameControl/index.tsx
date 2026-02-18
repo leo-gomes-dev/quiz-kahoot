@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../lib/supabase";
 import confetti from "canvas-confetti";
-import LeoGomesFooter from "../footer";
-import { QuestionCard } from "./QuestionCard";
-import { RankingList } from "./RankingList";
-import { Podium } from "./Podium";
-import { Header } from "./Header";
-import { CodeModal } from "./Modals/CodeModal";
-import { GabaritoModal } from "./Modals/GabaritoModal";
-import type { GameControlProps, LeaderboardEntry } from "../../types/game";
+import LeoGomesFooter from "../components/footer";
+import { QuestionCard } from "./components/QuestionCard";
+import { RankingList } from "./components/RankingList";
+import { Podium } from "./components/Podium";
+import { Header } from "./components/Header";
+import { CodeModal } from "../components/Modals/CodeModal";
+import { GabaritoModal } from "../components/Modals/GabaritoModal";
+import type { GameControlProps, LeaderboardEntry } from "./../types/game";
 
 export default function GameControl({
   questions,

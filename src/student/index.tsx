@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "./../lib/supabase";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import confetti from "canvas-confetti";
-import LeoGomesFooter from "../footer";
-import { QuestionScreen } from "./QuestionScreen";
-import { RankingScreen } from "./RankingScreen";
-import { GameOverScreen } from "./GameOverScreen";
-import { StudentWaiting } from "./StudentWaiting";
-import type { Question, LeaderboardEntry } from "../../types/game";
+import LeoGomesFooter from "../../src/components/footer";
+import { QuestionScreen } from "./components/QuestionScreen";
+import { RankingScreen } from "./components/RankingScreen";
+import { GameOverScreen } from "./components/GameOverScreen";
+import { StudentWaiting } from "./components/StudentWaiting";
+import type { Question, LeaderboardEntry } from "./../types/game";
 
 interface GameStatusRow {
   status: string;

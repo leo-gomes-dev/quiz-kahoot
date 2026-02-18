@@ -25,3 +25,6 @@ export interface GameStatus {
   current_question_index: number;
   game_code: string;
 }
+
+export type OptionKey = "a" | "b" | "c" | "d";
+export type OptionsType = { [key in OptionKey]: string };

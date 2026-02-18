@@ -1,5 +1,5 @@
 import React from "react";
-import type { Question } from "./../../../types/game";
+import type { Question } from "./../../types/game";
 
 interface GabaritoModalProps {
   question: Question | null;
