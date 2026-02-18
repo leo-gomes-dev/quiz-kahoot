@@ -1,5 +1,5 @@
 import React from "react";
-import type { LeaderboardEntry } from "./../types/game";
+import type { LeaderboardEntry } from "../../types/game";
 
 interface PodiumStepProps {
   player: string;
