@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* FORÇA O CURSOR POINTER EM TODOS OS BOTÕES E LINKS */
+button,
+a,
+[role="button"] {
+  cursor: pointer !important;
+}
+
+/* CURSOR DE ESPERA QUANDO O BOTÃO ESTIVER DESABILITADO OU EM LOADING */
+button:disabled,
+.cursor-wait {
+  cursor: wait !important;
+}
+
 @keyframes bounce-slow {
   0%,
   100% {
@@ -9,9 +22,11 @@
     transform: translateY(-10px) rotate(3deg);
   }
 }
+
 .animate-bounce-slow {
   animation: bounce-slow 3s ease-in-out infinite;
 }
+
 @keyframes shake {
   0%,
   100% {
@@ -24,6 +39,7 @@
     transform: translateX(5px);
   }
 }
+
 .animate-shake {
   animation: shake 0.2s ease-in-out 0s 2;
 }

@@ -242,6 +242,7 @@ export default function GameControl({
         winners={leaderboard.slice(0, 3)}
         onReset={handleRestartSameRoom}
         onFinish={handleCleanupAndExit}
+        exitStage={exitStage} // Adicione esta linha (assumindo que o nome do seu estado é exitStage)
       />
     );
 
