@@ -31,7 +31,6 @@ export default function GameControl({
   const [isBlockTransition, setIsBlockTransition] = useState(false);
   const [blockCountdown, setBlockCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-
   const [questionDuration, setQuestionDuration] = useState(25);
   const timerRef = useRef<number | null>(null);
 
@@ -44,133 +43,136 @@ export default function GameControl({
     if (data) setLeaderboard(data as LeaderboardEntry[]);
   }, [gameCode]);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+  const handleRestartSameRoom = useCallback(async () => {
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    setIndex(0);
+    setIsLobby(true);
+    setShowPodium(false);
+    setIsRankingMode(false);
+    setPreCountdown(null);
+    setTimeLeft(null);
+    setBlockCountdown(null);
+    setIsBlockTransition(false);
+    localStorage.removeItem(storageKey);
+    await supabase
+      .from("game_status")
+      .update({ status: "lobby", current_question_index: -1, expires_at: null })
+      .eq("game_code", gameCode);
+    onReset();
+  }, [gameCode, storageKey, onReset]);
+
+  const handleCleanupAndExit = async () => {
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    await supabase.from("leaderboard").delete().eq("game_code", gameCode);
+    await supabase.from("game_status").delete().eq("game_code", gameCode);
+    localStorage.removeItem(storageKey);
+    onFinish();
   };
 
   const handleFinish = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
     setTimeLeft(null);
-    localStorage.removeItem(storageKey);
     await supabase
       .from("game_status")
       .update({ status: "finished", expires_at: null })
       .eq("game_code", gameCode);
     await fetchRanking();
-    void confetti({ particleCount: 150, zIndex: 200 });
     setShowPodium(true);
-  }, [gameCode, fetchRanking, storageKey]);
+    void confetti({ particleCount: 150, zIndex: 200, origin: { y: 0.6 } });
+  }, [gameCode, fetchRanking]);
 
   const handleNext = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
     setTimeLeft(null);
-
-    const nextIndex = index + 1;
-
-    // 1. Se chegou ao fim, chama o finish e para aqui
-    if (nextIndex >= questions.length) {
-      return handleFinish();
-    }
-
-    // 2. Atualiza o índice LOCAL do professor
-    setIndex(nextIndex);
-
-    // 3. ATUALIZAÇÃO NO BANCO:
-    // O status "ranking" deve manter o índice da pergunta que ACABOU de passar (index)
-    // ou apenas sinalizar a transição.
+    if (index >= questions.length - 1) return handleFinish();
     await supabase
       .from("game_status")
       .update({
         status: "ranking",
-        current_question_index: index, // Mantém a referência da questão encerrada
+        current_question_index: index,
         expires_at: null,
       })
       .eq("game_code", gameCode);
-
-    // 4. OBRIGATÓRIO: Busca o ranking atualizado do banco para o estado do Professor
     void fetchRanking();
-
-    // 5. Lógica de blocos ou contagem regressiva
-    if (nextIndex > 0 && nextIndex % 5 === 0) {
+    const nextIdx = index + 1;
+    if (nextIdx > 0 && nextIdx % 5 === 0) {
       setIsBlockTransition(true);
       setBlockCountdown(5);
     } else {
       setPreCountdown(5);
     }
-  }, [index, questions.length, gameCode, handleFinish, fetchRanking]); // Adicionado fetchRanking nas dependências
+  }, [index, questions.length, gameCode, handleFinish, fetchRanking]);
 
   const executeSkip = useCallback(async () => {
     setPreCountdown(null);
     setBlockCountdown(null);
     setIsBlockTransition(false);
-
-    const nextIdx = isLobby ? 0 : index;
+    const targetIdx = isLobby ? 0 : index + 1;
+    if (targetIdx >= questions.length) return handleFinish();
+    if (!isLobby) setIndex(targetIdx);
     const expiresAt = new Date(
-      Date.now() + questionDuration * 1000,
+      Date.now() + (questionDuration + 2) * 1000,
     ).toISOString();
-
     const { error } = await supabase
       .from("game_status")
       .update({
-        current_question_index: nextIdx,
+        current_question_index: targetIdx,
         status: "playing",
         expires_at: expiresAt,
       })
       .eq("game_code", gameCode);
-
     if (!error) {
       if (isLobby) setIsLobby(false);
       setIsRankingMode(false);
-
       if (timerRef.current) window.clearInterval(timerRef.current);
-
       timerRef.current = window.setInterval(() => {
-        const now = Date.now();
-        const end = new Date(expiresAt).getTime();
-        const diff = Math.max(0, Math.floor((end - now) / 1000));
-
+        const diff = Math.max(
+          0,
+          Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
+        );
         setTimeLeft(diff);
-
         if (diff <= 0) {
           if (timerRef.current) window.clearInterval(timerRef.current);
-          handleNext();
+          void handleNext();
         }
       }, 1000);
     }
-  }, [gameCode, index, isLobby, questionDuration, handleNext]);
+  }, [
+    gameCode,
+    index,
+    isLobby,
+    questionDuration,
+    handleNext,
+    questions.length,
+    handleFinish,
+  ]);
 
   useEffect(() => {
     const init = async () => {
-      const { data: existing } = await supabase
+      const { data } = await supabase
         .from("game_status")
         .select("game_code")
         .eq("game_code", gameCode)
         .maybeSingle();
-
-      if (existing) {
+      if (data)
         await supabase
           .from("game_status")
-          .update({
+          .update({ status: "lobby", current_question_index: -1 })
+          .eq("game_code", gameCode);
+      else
+        await supabase
+          .from("game_status")
+          .insert({
+            game_code: gameCode,
             status: "lobby",
             current_question_index: -1,
-            expires_at: null,
-          })
-          .eq("game_code", gameCode);
-      } else {
-        await supabase.from("game_status").insert({
-          game_code: gameCode,
-          status: "lobby",
-          current_question_index: -1,
-        });
-      }
-      void fetchRanking();
+          });
     };
-    void init();
+    init();
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [gameCode, fetchRanking]);
+  }, [gameCode]);
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify({ index, isLobby }));
@@ -178,56 +180,52 @@ export default function GameControl({
 
   useEffect(() => {
     if (blockCountdown === null) return;
-    const timer = window.setInterval(() => {
+    const t = window.setInterval(() => {
       setBlockCountdown((bc) => {
         if (bc !== null && bc <= 1) {
-          window.clearInterval(timer);
+          window.clearInterval(t);
           void executeSkip();
           return 0;
         }
         return bc !== null ? bc - 1 : 0;
       });
     }, 1000);
-    return () => window.clearInterval(timer);
+    return () => window.clearInterval(t);
   }, [blockCountdown, executeSkip]);
 
   useEffect(() => {
     if (preCountdown === null) return;
-    // Avisa o aluno que começou a contagem de preparação
     void supabase
       .from("game_status")
       .update({ status: "started" })
       .eq("game_code", gameCode);
-
-    const timer = window.setInterval(() => {
+    const t = window.setInterval(() => {
       setPreCountdown((pc) => {
         if (pc !== null && pc <= 1) {
-          window.clearInterval(timer);
+          window.clearInterval(t);
           void executeSkip();
           return 0;
         }
         return pc !== null ? pc - 1 : 0;
       });
     }, 1000);
-    return () => window.clearInterval(timer);
+    return () => window.clearInterval(t);
   }, [preCountdown, executeSkip, gameCode]);
 
   if (showPodium)
     return (
-      <Podium winners={leaderboard} onReset={onReset} onFinish={onFinish} />
+      <Podium
+        winners={leaderboard.slice(0, 3)}
+        onReset={handleRestartSameRoom}
+        onFinish={handleCleanupAndExit}
+      />
     );
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
-      {toast && (
-        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[150] bg-green-500 p-4 rounded-xl font-bold">
-          {toast}
-        </div>
-      )}
-
       {isBlockTransition && (
-        <div className="fixed inset-0 z-[120] bg-indigo-950/95 flex items-center justify-center p-6 text-center">
-          <div className="bg-white rounded-[4rem] p-12 w-full max-w-lg shadow-2xl border-b-[12px] border-gray-300 text-indigo-900">
+        <div className="fixed inset-0 z-50 bg-indigo-950/95 flex items-center justify-center p-6 text-center text-indigo-900">
+          <div className="bg-white rounded-[4rem] p-12 w-full max-w-lg shadow-2xl border-b-[12px] border-gray-300">
             <h2 className="text-indigo-400 font-black uppercase mb-2">
               Próximo Bloco em:
             </h2>
@@ -243,10 +241,9 @@ export default function GameControl({
           </div>
         </div>
       )}
-
       {isLobby ? (
-        <main className="flex-1 flex flex-col items-center justify-center p-6">
-          <div className="bg-white rounded-[4rem] p-10 w-full max-w-2xl shadow-2xl border-b-[12px] border-gray-300 text-center">
+        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-white rounded-[4rem] p-10 w-full max-w-2xl shadow-2xl border-b-[12px] border-gray-300 text-indigo-900">
             <h1 className="text-indigo-400 font-black uppercase mb-2">
               Código da Sala:
             </h1>
@@ -255,32 +252,30 @@ export default function GameControl({
             </div>
             <div className="mb-6 flex flex-col items-center">
               <label className="text-indigo-900 font-black mb-2 uppercase text-sm">
-                Tempo por Questão (segundos):
+                Tempo por Questão (s):
               </label>
               <input
                 type="number"
                 value={questionDuration}
                 onChange={(e) => setQuestionDuration(Number(e.target.value))}
-                className="w-32 text-center text-3xl font-black p-3 rounded-2xl border-4 border-indigo-100 text-indigo-900 focus:border-indigo-500 outline-none"
+                className="w-32 text-center text-3xl font-black p-3 rounded-2xl border-4 border-indigo-100 text-indigo-900 outline-none"
               />
             </div>
-            <div className="flex flex-col gap-4">
-              <button
-                onClick={() => {
-                  setIsLobby(false);
-                  setPreCountdown(5);
-                }}
-                className="w-full py-6 bg-green-500 text-white rounded-[2rem] font-black text-2xl shadow-[0_8px_0_0_#15803d] active:translate-y-1 uppercase"
-              >
-                🚀 Abrir Arena
-              </button>
-              <button
-                onClick={onFinish}
-                className="w-full py-4 bg-gray-200 text-gray-500 rounded-[1.5rem] font-black text-xl shadow-[0_6px_0_0_#cbd5e1] active:translate-y-1 uppercase text-center"
-              >
-                Sair
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setIsLobby(false);
+                setPreCountdown(5);
+              }}
+              className="w-full py-6 bg-green-500 text-white rounded-[2rem] font-black text-2xl shadow-[0_8px_0_0_#15803d] uppercase"
+            >
+              🚀 Abrir Arena
+            </button>
+            <button
+              onClick={handleCleanupAndExit}
+              className="mt-4 text-indigo-300 font-bold uppercase text-sm"
+            >
+              Sair e Fechar Sala
+            </button>
           </div>
         </main>
       ) : (
@@ -293,7 +288,7 @@ export default function GameControl({
               onShowCode={() => setShowCodeModal(true)}
               onToggleRanking={() => setIsRankingMode(!isRankingMode)}
               onShowGabarito={() => setShowGabaritoModal(true)}
-              onExit={onFinish}
+              onExit={handleCleanupAndExit}
               exitStage={false}
             />
             {!isRankingMode && timeLeft !== null && preCountdown === null && (
@@ -324,7 +319,7 @@ export default function GameControl({
                   leaderboard={leaderboard}
                   onBack={() => setIsRankingMode(false)}
                 />
-              ) : (
+              ) : questions[index] ? (
                 <QuestionCard
                   question={questions[index]}
                   index={index}
@@ -332,19 +327,19 @@ export default function GameControl({
                   onNext={() => void handleNext()}
                   isLast={index === questions.length - 1}
                 />
-              )}
+              ) : null}
             </div>
           </div>
         </main>
       )}
-
       <CodeModal
         isOpen={showCodeModal}
         gameCode={gameCode}
         onClose={() => setShowCodeModal(false)}
         onCopy={() => {
           navigator.clipboard.writeText(gameCode);
-          showToast("Copiado! 📋");
+          setToast("Copiado!");
+          setTimeout(() => setToast(null), 2000);
         }}
       />
       <GabaritoModal
@@ -352,6 +347,11 @@ export default function GameControl({
         question={questions[index]}
         onClose={() => setShowGabaritoModal(false)}
       />
+      {toast && (
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-50 bg-green-500 p-4 rounded-xl font-bold">
+          {toast}
+        </div>
+      )}
       <LeoGomesFooter />
     </div>
   );
