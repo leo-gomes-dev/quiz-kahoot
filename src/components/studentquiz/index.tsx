@@ -41,9 +41,9 @@ export default function StudentQuiz({
   const [questionDuration, setQuestionDuration] = useState<number>(10);
   const [showProfessorLeft, setShowProfessorLeft] = useState(false);
 
-  const triggerVictory = (): void => {
+  const triggerVictory = useCallback((): void => {
     const end = Date.now() + 5000;
-    const interval: number = window.setInterval(() => {
+    const interval = window.setInterval(() => {
       if (Date.now() > end) return window.clearInterval(interval);
       void confetti({
         particleCount: 40,
@@ -52,7 +52,7 @@ export default function StudentQuiz({
         zIndex: 999,
       });
     }, 250);
-  };
+  }, []);
 
   const fetchMyScore = useCallback(async () => {
     const { data } = await supabase
@@ -76,26 +76,35 @@ export default function StudentQuiz({
 
   const fetchQuestionData = useCallback(
     async (index: number, expiresAt?: string | null) => {
-      if (index < 0) return;
+      // 🔥 CORREÇÃO EXTRA: Se for lobby ou reset, não carrega pergunta
+      if (index < 0) {
+        setView("loading");
+        setCurrentQuestion(null);
+        return;
+      }
+
       setAnswered(false);
       setIsCorrect(null);
       setSelectedChoice(null);
       setCurrentIndex(index);
+
       const { data } = await supabase
         .from("questions")
         .select("*")
         .eq("game_code", gameCode)
         .order("created_at", { ascending: true });
+
       if (data && data[index]) {
         const q = data[index];
-        setQuestionDuration(q.timer || 10);
+        const duration = q.timer || 10;
+        setQuestionDuration(duration);
         setTimeLeft(
           expiresAt
             ? Math.max(
                 0,
                 Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
               )
-            : q.timer || 10,
+            : duration,
         );
         setCurrentQuestion({
           id: q.id,
@@ -128,33 +137,50 @@ export default function StudentQuiz({
           filter: `game_code=eq.${gameCode}`,
         },
         async (payload: RealtimePostgresChangesPayload<GameStatusRow>) => {
-          if (payload.eventType === "DELETE") return setShowProfessorLeft(true);
+          if (payload.eventType === "DELETE") {
+            setShowProfessorLeft(true);
+            return;
+          }
+
           const newData = payload.new as GameStatusRow;
           if (!newData) return;
-          if (newData.status === "playing") {
-            setIsPreparing(false);
-            void fetchQuestionData(
-              Number(newData.current_question_index),
-              newData.expires_at,
-            );
-            return;
-          }
-          if (newData.status === "lobby") {
-            setView("loading");
-            setAnswered(false);
-            setIsPreparing(false);
-            return;
-          }
-          if (newData.status === "finished") {
-            await fetchMyScore();
-            setView("gameover");
-            triggerVictory();
-            return;
-          }
-          if (newData.status === "ranking" || newData.status === "started") {
-            setIsPreparing(true);
-            await fetchRanking();
-            setView("ranking");
+
+          switch (newData.status) {
+            case "lobby":
+              setView("loading");
+              setIsPreparing(false);
+              break;
+
+            case "ranking":
+              setIsPreparing(false);
+              await fetchRanking();
+              setView("ranking");
+              break;
+
+            case "started":
+              // Apenas feedback visual
+              setIsPreparing(true);
+              setView("loading");
+              break;
+
+            case "playing": {
+              setIsPreparing(false);
+
+              const newIndex = Number(newData.current_question_index);
+
+              // 🔥 Só atualiza se realmente mudou de pergunta
+              if (newIndex !== currentIndex) {
+                void fetchQuestionData(newIndex, newData.expires_at);
+              }
+
+              break;
+            }
+
+            case "finished":
+              await fetchMyScore();
+              setView("gameover");
+              triggerVictory();
+              break;
           }
         },
       )
@@ -166,126 +192,156 @@ export default function StudentQuiz({
         .select("*")
         .eq("game_code", gameCode)
         .maybeSingle();
-      if (!data) return onExit();
-      if (data.status === "playing")
-        void fetchQuestionData(data.current_question_index, data.expires_at);
-      else if (data.status === "finished") {
-        await fetchMyScore();
-        setView("gameover");
-        triggerVictory();
-      } else if (data.status === "ranking" || data.status === "started") {
-        await fetchRanking();
-        setView("ranking");
-      } else if (data.status === "lobby") setView("loading");
-    };
-    void init();
-    const watchdog = window.setInterval(async () => {
-      const { data } = await supabase
-        .from("game_status")
-        .select("status, current_question_index, expires_at")
-        .eq("game_code", gameCode)
-        .maybeSingle();
-      if (!data && view !== "gameover") setShowProfessorLeft(true);
-      if (
-        data &&
-        data.status === "playing" &&
-        (currentIndex !== data.current_question_index || view !== "question")
-      )
-        void fetchQuestionData(data.current_question_index, data.expires_at);
-      if (data?.status === "finished" && view !== "gameover") {
-        await fetchMyScore();
-        setView("gameover");
-        triggerVictory();
+
+      if (!data) {
+        onExit();
+        return;
       }
-    }, 2500);
+
+      switch (data.status) {
+        case "playing":
+          void fetchQuestionData(data.current_question_index, data.expires_at);
+          break;
+
+        case "ranking":
+          await fetchRanking();
+          setView("ranking");
+          break;
+
+        case "finished":
+          await fetchMyScore();
+          setView("gameover");
+          triggerVictory();
+          break;
+
+        case "started":
+          setIsPreparing(true);
+          setView("loading");
+          break;
+
+        default:
+          setView("loading");
+          setIsPreparing(false);
+      }
+    };
+
+    void init();
+
     return () => {
-      void supabase.removeChannel(channel);
-      window.clearInterval(watchdog);
+      supabase.removeChannel(channel);
     };
   }, [
     gameCode,
+    currentIndex, // 🔥 IMPORTANTE
     onExit,
     fetchQuestionData,
     fetchRanking,
     fetchMyScore,
-    view,
-    currentIndex,
+    triggerVictory,
   ]);
 
   useEffect(() => {
     let timer: number | undefined;
-    if (view === "question" && timeLeft > 0 && !answered)
+    if (view === "question" && timeLeft > 0 && !answered) {
       timer = window.setInterval(
         () => setTimeLeft((p) => (p > 0 ? p - 1 : 0)),
         1000,
       );
+    }
     return () => {
       if (timer) window.clearInterval(timer);
     };
   }, [view, timeLeft, answered]);
 
   return (
-    <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative">
+    <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
+      <header className="w-full p-4 flex justify-between items-center bg-black/40 backdrop-blur-md z-40 sticky top-0 border-b border-white/10">
+        <div className="flex items-center gap-3 text-left">
+          <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center font-black border-2 border-white/20 shadow-lg">
+            {playerName.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black uppercase text-purple-300 tracking-widest leading-none opacity-70">
+              Jogador
+            </span>
+            <span className="text-lg font-black leading-tight text-white">
+              {playerName}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowExitConfirm(true)}
+          className="px-6 py-2 bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white rounded-xl font-black text-sm transition-all border-2 border-red-500/50 uppercase"
+        >
+          Sair
+        </button>
+      </header>
+
+      {/* MODAL PROFESSOR SAIU */}
       {showProfessorLeft && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-[3rem] p-10 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
-            <h3 className="text-2xl font-black uppercase mb-4">
-              Sala Encerrada
+            <h3 className="text-2xl font-black uppercase mb-4 leading-tight">
+              O professor encerrou a sala!
             </h3>
             <button
               onClick={onExit}
-              className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black"
+              className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase shadow-[0_6px_0_0_#312e81]"
             >
-              VOLTAR AO INÍCIO
+              Voltar ao Início
             </button>
           </div>
         </div>
       )}
+
+      {/* MODAL SAIR CONFIRMAÇÃO */}
       {showExitConfirm && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center text-indigo-900 shadow-2xl">
-            <h3 className="text-2xl font-black mb-4 uppercase">
-              Sair do Jogo?
+            <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter">
+              Deseja sair da partida?
             </h3>
             <div className="flex flex-col gap-3">
               <button
                 onClick={onExit}
-                className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase"
+                className="w-full py-4 bg-red-600 text-white rounded-xl font-black uppercase shadow-[0_4px_0_0_#991b1b]"
               >
-                Confirmar
+                Sim, Sair
               </button>
               <button
                 onClick={() => setShowExitConfirm(false)}
-                className="w-full py-4 bg-gray-100 text-gray-400 rounded-2xl font-black uppercase"
+                className="w-full py-4 bg-gray-100 text-gray-500 rounded-xl font-black uppercase"
               >
-                Voltar
+                Cancelar
               </button>
             </div>
           </div>
         </div>
       )}
-      <main className="flex-1 flex flex-col items-center justify-center">
+
+      <main className="flex-1 flex flex-col items-center justify-center p-4 relative">
         {view === "loading" && (
           <StudentWaiting
             playerName={playerName}
             gameCode={gameCode}
             isPreparing={isPreparing}
-            onExit={() => setShowExitConfirm(true)}
           />
         )}
+
         {view === "ranking" && (
           <RankingScreen leaderboard={leaderboard} playerName={playerName} />
         )}
+
         {view === "question" && currentQuestion && (
           <QuestionScreen
-            key={`q-${currentIndex}`}
+            key={`q-${currentIndex}`} // FIM DA NECESSIDADE DE F5
             question={currentQuestion}
             gameCode={gameCode}
             playerScore={playerScore}
             answered={answered}
             isCorrect={isCorrect}
             selectedChoice={selectedChoice}
-            onAnswer={async (c) => {
+            onAnswer={async (c: string) => {
               if (answered) return;
               setAnswered(true);
               setSelectedChoice(c);
@@ -301,9 +357,9 @@ export default function StudentQuiz({
             }}
             timeLeft={timeLeft}
             duration={questionDuration}
-            onExitClick={() => setShowExitConfirm(true)}
           />
         )}
+
         {view === "gameover" && (
           <GameOverScreen
             playerName={playerName}
@@ -312,6 +368,7 @@ export default function StudentQuiz({
           />
         )}
       </main>
+
       <LeoGomesFooter />
     </div>
   );

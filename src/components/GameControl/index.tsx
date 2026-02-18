@@ -19,8 +19,10 @@ export default function GameControl({
   const storageKey = `quiz_prof_state_${gameCode}`;
   const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
 
-  const [index, setIndex] = useState<number>(saved.index ?? 0);
   const [isLobby, setIsLobby] = useState<boolean>(saved.isLobby ?? true);
+  // Altere para que o index inicial seja sempre 0 no primeiro carregamento do Lobby
+  const [index, setIndex] = useState<number>(isLobby ? 0 : (saved.index ?? 0));
+
   const [showPodium, setShowPodium] = useState(false);
   const [isRankingMode, setIsRankingMode] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -56,18 +58,22 @@ export default function GameControl({
     localStorage.removeItem(storageKey);
     await supabase
       .from("game_status")
-      .update({ status: "lobby", current_question_index: -1, expires_at: null })
+      .update({
+        status: "lobby",
+        current_question_index: -1,
+        expires_at: new Date().toISOString(),
+      })
       .eq("game_code", gameCode);
     onReset();
   }, [gameCode, storageKey, onReset]);
 
-  const handleCleanupAndExit = async () => {
+  const handleCleanupAndExit = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
     await supabase.from("leaderboard").delete().eq("game_code", gameCode);
     await supabase.from("game_status").delete().eq("game_code", gameCode);
     localStorage.removeItem(storageKey);
     onFinish();
-  };
+  }, [gameCode, storageKey, onFinish]);
 
   const handleFinish = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
@@ -84,7 +90,11 @@ export default function GameControl({
   const handleNext = useCallback(async () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
     setTimeLeft(null);
+
+    // Se já terminamos as perguntas, vai para o pódio
     if (index >= questions.length - 1) return handleFinish();
+
+    // 1. SINALIZA RANKING (O Aluno vê o ranking da pergunta que ACABOU de passar)
     await supabase
       .from("game_status")
       .update({
@@ -93,8 +103,15 @@ export default function GameControl({
         expires_at: null,
       })
       .eq("game_code", gameCode);
+
     void fetchRanking();
+    setIsRankingMode(true);
+
+    // 2. INCREMENTA O ÍNDICE PARA A PRÓXIMA PERGUNTA
     const nextIdx = index + 1;
+    setIndex(nextIdx); // O estado muda AQUI, antes dos 5 segundos de countdown
+
+    // 3. DECIDE SE É BLOCO OU QUESTÃO COMUM
     if (nextIdx > 0 && nextIdx % 5 === 0) {
       setIsBlockTransition(true);
       setBlockCountdown(5);
@@ -107,36 +124,50 @@ export default function GameControl({
     setPreCountdown(null);
     setBlockCountdown(null);
     setIsBlockTransition(false);
-    const targetIdx = isLobby ? 0 : index + 1;
+
+    // 🔥 CORREÇÃO REAL: Se o index for -1 (lobby), começamos no 0.
+    // Se já for >= 0, mantemos o index atual (pois o handleNext já preparou o terreno).
+    const targetIdx = index < 0 ? 0 : index;
+
     if (targetIdx >= questions.length) return handleFinish();
-    if (!isLobby) setIndex(targetIdx);
+
+    // ATUALIZAÇÃO DE ESTADO LOCAL
+    setIndex(targetIdx);
+    if (isLobby) setIsLobby(false);
+
     const expiresAt = new Date(
       Date.now() + (questionDuration + 2) * 1000,
     ).toISOString();
+
+    // ATUALIZAÇÃO NO SUPABASE
     const { error } = await supabase
       .from("game_status")
       .update({
-        current_question_index: targetIdx,
+        current_question_index: targetIdx, // Aqui vai o 0 real na primeira pergunta
         status: "playing",
         expires_at: expiresAt,
       })
       .eq("game_code", gameCode);
-    if (!error) {
-      if (isLobby) setIsLobby(false);
-      setIsRankingMode(false);
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = window.setInterval(() => {
-        const diff = Math.max(
-          0,
-          Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
-        );
-        setTimeLeft(diff);
-        if (diff <= 0) {
-          if (timerRef.current) window.clearInterval(timerRef.current);
-          void handleNext();
-        }
-      }, 1000);
+
+    if (error) {
+      console.error("Erro ao iniciar questão:", error.message);
+      return;
     }
+
+    setIsRankingMode(false);
+
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = window.setInterval(() => {
+      const diff = Math.max(
+        0,
+        Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
+      );
+      setTimeLeft(diff);
+      if (diff <= 0) {
+        if (timerRef.current) window.clearInterval(timerRef.current);
+        void handleNext();
+      }
+    }, 1000);
   }, [
     gameCode,
     index,
@@ -149,30 +180,21 @@ export default function GameControl({
 
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase
+      localStorage.removeItem(storageKey); // Limpa cache local
+      setIndex(-1); // Estado inicial neutro
+      setIsLobby(true);
+
+      await supabase
         .from("game_status")
-        .select("game_code")
-        .eq("game_code", gameCode)
-        .maybeSingle();
-      if (data)
-        await supabase
-          .from("game_status")
-          .update({ status: "lobby", current_question_index: -1 })
-          .eq("game_code", gameCode);
-      else
-        await supabase
-          .from("game_status")
-          .insert({
-            game_code: gameCode,
-            status: "lobby",
-            current_question_index: -1,
-          });
+        .update({
+          status: "lobby",
+          current_question_index: -1, // Banco em sincronia
+          expires_at: null,
+        })
+        .eq("game_code", gameCode);
     };
     init();
-    return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-    };
-  }, [gameCode]);
+  }, [gameCode, storageKey]);
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify({ index, isLobby }));
@@ -242,8 +264,8 @@ export default function GameControl({
         </div>
       )}
       {isLobby ? (
-        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div className="bg-white rounded-[4rem] p-10 w-full max-w-2xl shadow-2xl border-b-[12px] border-gray-300 text-indigo-900">
+        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center text-indigo-900">
+          <div className="bg-white rounded-[4rem] p-10 w-full max-w-2xl shadow-2xl border-b-[12px] border-gray-300">
             <h1 className="text-indigo-400 font-black uppercase mb-2">
               Código da Sala:
             </h1>
@@ -269,12 +291,6 @@ export default function GameControl({
               className="w-full py-6 bg-green-500 text-white rounded-[2rem] font-black text-2xl shadow-[0_8px_0_0_#15803d] uppercase"
             >
               🚀 Abrir Arena
-            </button>
-            <button
-              onClick={handleCleanupAndExit}
-              className="mt-4 text-indigo-300 font-bold uppercase text-sm"
-            >
-              Sair e Fechar Sala
             </button>
           </div>
         </main>
