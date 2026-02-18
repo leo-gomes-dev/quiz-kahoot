@@ -248,102 +248,63 @@ export default function StudentQuiz({
   ]);
 
   useEffect(() => {
-    // 1. Criar canal persistente
+    // 1. CANAL REALTIME (Ouvido rápido)
     const channel = supabase
-      .channel(`room_${gameCode}`)
+      .channel(`game_${gameCode}`)
       .on<GameStatusRow>(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
           table: "game_status",
           filter: `game_code=eq.${gameCode}`,
         },
-        async (payload) => {
-          // Log para debug em produção - cheque o console do Chrome
-          console.log("MUDANÇA RECEBIDA:", payload.new);
-
-          if (payload.eventType === "DELETE") {
-            setShowProfessorLeft(true);
-            return;
-          }
-
-          const newData = payload.new as GameStatusRow;
-          if (!newData) return;
-
-          // REAÇÃO IMEDIATA AOS STATUS
-          if (newData.status === "playing") {
-            setIsPreparing(false);
-            void fetchQuestionData(
-              Number(newData.current_question_index),
-              newData.expires_at,
-            );
-          } else if (newData.status === "ranking") {
-            setIsPreparing(false);
-            await fetchRanking();
-            setView("ranking");
-          } else if (newData.status === "started") {
-            setIsPreparing(true);
-            setView("loading");
-
-            // Check de segurança: se o sinal de 'playing' já passou
-            const { data: check } = await supabase
-              .from("game_status")
-              .select("*")
-              .eq("game_code", gameCode)
-              .maybeSingle();
-
-            if (check?.status === "playing") {
-              setIsPreparing(false);
-              void fetchQuestionData(
-                Number(check.current_question_index),
-                check.expires_at,
-              );
-            }
-          } else if (newData.status === "finished") {
-            await fetchMyScore();
-            setView("gameover");
-            triggerVictory();
-          }
-        },
+        (payload) => syncGameState(payload.new as GameStatusRow),
       )
-      .subscribe((status) => {
-        console.log("STATUS DA CONEXÃO:", status);
-      });
+      .subscribe();
 
-    // 2. Init para quem entrou com o bonde andando
-    const init = async () => {
+    // 2. FUNÇÃO DE SINCRONIA (A mesma para Realtime e Polling)
+    const syncGameState = async (data: GameStatusRow) => {
+      if (!data) return;
+
+      // Se o status for playing e o índice mudou, força a busca
+      if (data.status === "playing") {
+        setIsPreparing(false);
+        // Só busca se o índice for diferente do atual para não dar loop
+        void fetchQuestionData(
+          Number(data.current_question_index),
+          data.expires_at,
+        );
+      } else if (data.status === "ranking") {
+        setIsPreparing(false);
+        await fetchRanking();
+        setView("ranking");
+      } else if (data.status === "started") {
+        setIsPreparing(true);
+        setView("loading");
+      } else if (data.status === "finished") {
+        setView("gameover");
+        triggerVictory();
+      }
+    };
+
+    // 3. 🔥 FORÇA BRUTA: Polling de Segurança (Checa a cada 2 segundos)
+    // Isso garante que mesmo que o Realtime falhe, o aluno mude de tela sozinho
+    const safetyNet = setInterval(async () => {
       const { data } = await supabase
         .from("game_status")
         .select("*")
         .eq("game_code", gameCode)
         .maybeSingle();
 
-      if (!data) return onExit();
-
-      if (data.status === "playing") {
-        void fetchQuestionData(
-          Number(data.current_question_index),
-          data.expires_at,
-        );
-      } else if (data.status === "ranking") {
-        await fetchRanking();
-        setView("ranking");
-      } else if (data.status === "finished") {
-        setView("gameover");
-      } else {
-        setView("loading");
-        setIsPreparing(data.status === "started");
-      }
-    };
-
-    void init();
+      if (data) syncGameState(data);
+    }, 2000);
 
     return () => {
       void supabase.removeChannel(channel);
+      clearInterval(safetyNet);
     };
-    // REMOVIDO TUDO QUE FAZIA O CANAL RESETAR
-  }, [gameCode]); // CANAL SÓ DEPENDE DO CÓDIGO DA SALA
+  }, [gameCode, fetchQuestionData, fetchRanking, fetchMyScore]);
 
   return (
     <div className="min-h-screen bg-[#46178f] text-white font-nunito flex flex-col relative overflow-hidden">
